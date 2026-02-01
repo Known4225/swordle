@@ -341,7 +341,7 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
         }
     }
     list_t *order = list_sort_index_double(variance);
-    int32_t gatherTop = 25;
+    int32_t gatherTop = 100;
     if (order -> length < gatherTop) {
         gatherTop = order -> length;
     }
@@ -363,6 +363,7 @@ void *solverThread(void *arg) {
             list_t *best = list_init();
             list_t *canvasPossible = bestWord(word, best, self.canvas, self.possibleWords, self.allWords);
             list_copy(self.best, best);
+            // list_print(self.best);
             list_copy(self.canvasPossible, canvasPossible);
             list_free(best);
             list_free(canvasPossible);
@@ -378,6 +379,8 @@ BOOL WINAPI swordleSignal(DWORD signal) {
     return 0;
 }
 
+void fillBest();
+
 void init() {
     /* initialise canvas */
     for (int32_t i = 0; i < 60; i += 2) {
@@ -392,14 +395,14 @@ void init() {
     self.mouseIndex = -1;
     /* colors */
     double copyColors[] = {
-        248, 248, 248,
-        83, 141, 78,
-        181, 159, 59,
-        58, 58, 60,
-        86, 87, 88,
-        18, 18, 19,
-        129, 131, 132,
-        9, 9, 10,
+        248, 248, 248, // text
+        83, 141, 78, // green
+        181, 159, 59, // yellow
+        58, 58, 60, // grey
+        86, 87, 88, // border highlight
+        30, 30, 30, // background
+        129, 131, 132, // keyboard
+        9, 9, 10, // sidebar
     };
     memcpy(self.colors, copyColors, sizeof(copyColors));
     /* keyboard */
@@ -449,11 +452,11 @@ void init() {
     self.bestX = -250;
     self.bestIndex = 0;
     self.bestOffset = 0;
-    self.bestScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.bestX - 62, -8, 6, 330, 50);
+    self.bestScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.bestX + 62, -20, 6, 306, 50);
     self.possibleX = 250;
     self.possibleIndex = 0;
     self.possibleOffset = 0;
-    self.possibleScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.possibleX + 62, -8, 6, 330, 50);
+    self.possibleScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
 
     /* solver thread */
     self.solverThreadExists = 1;
@@ -462,6 +465,7 @@ void init() {
     pthread_create(&solverThreadVar, NULL, solverThread, NULL);
     /* signal handler */
     SetConsoleCtrlHandler(swordleSignal, TRUE);
+    fillBest();
 }
 
 void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double radius) {
@@ -621,16 +625,40 @@ void renderResults() {
         if (self.best -> length == 0) {
             swordle_setColor(SWORDLE_COLOR_TEXT);
             turtleTextWriteString("No Best Words", xpos, 0, 10, 50);
+            self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
         } else {
             swordle_setColor(SWORDLE_COLOR_TEXT);
-            turtleTextWriteString("Best", xpos - 30, ypos, 10, 50);
-            turtleTextWriteString("Variance", xpos + 30, ypos, 10, 50);
             ypos -= 20;
-            for (int32_t i = 0; i < self.best -> length; i += 2) {
+            self.bestIndex = 0;
+            self.bestOffset = 0;
+            int32_t bestLength = self.best -> length / 2;
+            if (bestLength > 26 * 2) {
+                self.bestScrollbar -> enabled = TT_ELEMENT_ENABLED;
+                self.bestScrollbar -> barPercentage = 100 / (bestLength / 26);
+                double divisor = bestLength * 100.0 / (bestLength - 26);
+                self.bestOffset = self.bestScrollbar -> value * bestLength / divisor * 12;
+                while (self.bestOffset > 12) {
+                    self.bestOffset -= 12;
+                    self.bestIndex += 2;
+                }
+            } else {
+                self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+            }
+            ypos += self.bestOffset;
+            int32_t bestEnding = self.bestIndex + 60;
+            if (bestEnding > self.best -> length) {
+                bestEnding = self.best -> length;
+            }
+            for (int32_t i = self.bestIndex; i < bestEnding; i += 2) {
                 turtleTextWriteString(self.best -> data[i].s, xpos - 30, ypos, 6, 50);
                 turtleTextWriteStringf(xpos + 30, ypos, 6, 50, "%.3lf", self.best -> data[i + 1].d);
                 ypos -= 12;
             }
+            swordle_setColor(SWORDLE_COLOR_SIDEBAR);
+            turtleRectangle(-320, 150 - 16, xpos + 70, 180);
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtleTextWriteString("Best", xpos - 30, 150, 10, 50);
+            turtleTextWriteString("Variance", xpos + 30, 150, 10, 50);
         }
     }
     xpos = self.possibleX;
@@ -686,7 +714,7 @@ void renderResults() {
         swordle_setColor(SWORDLE_COLOR_SIDEBAR);
         turtleRectangle(320, 150 - 16, xpos - 70, 180);
         swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleTextWriteString("Possible", xpos, 150, 10, 50);
+        turtleTextWriteStringf(xpos, 150, 10, 50, "Possible (%d)", selectList -> length);
     }
 }
 
@@ -764,7 +792,12 @@ void parseRibbonOutput() {
             }
             self.cursorIndex = 0;
             list_clear(self.best);
+            fillBest();
             list_clear(self.canvasPossible);
+            self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+            self.possibleScrollbar -> value = 0;
+            self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+            self.bestScrollbar -> value = 0;
         }
         if (tt_ribbon.output[2] == 2) { // Save
             if (osToolsFileDialog.selectedFilenames -> length == 0) {
@@ -926,4 +959,209 @@ int main(int argc, char *argv[]) {
     turtleFree();
     glfwTerminate();
     return 0;
+}
+
+
+void fillBest() {
+    /* fill best with initial best (precalculated) */
+    list_append(self.best, (unitype) "ROATE", 's');
+    list_append(self.best, (unitype) 484.891260, 'd');
+    list_append(self.best, (unitype) "TIARE", 's');
+    list_append(self.best, (unitype) 489.738996, 'd');
+    list_append(self.best, (unitype) "RAISE", 's');
+    list_append(self.best, (unitype) 490.379972, 'd');
+    list_append(self.best, (unitype) "RAILE", 's');
+    list_append(self.best, (unitype) 493.525005, 'd');
+    list_append(self.best, (unitype) "SOARE", 's');
+    list_append(self.best, (unitype) 502.767803, 'd');
+    list_append(self.best, (unitype) "ARISE", 's');
+    list_append(self.best, (unitype) 516.338819, 'd');
+    list_append(self.best, (unitype) "IRATE", 's');
+    list_append(self.best, (unitype) 516.849108, 'd');
+    list_append(self.best, (unitype) "ORATE", 's');
+    list_append(self.best, (unitype) 517.911836, 'd');
+    list_append(self.best, (unitype) "ARIEL", 's');
+    list_append(self.best, (unitype) 531.220478, 'd');
+    list_append(self.best, (unitype) "AROSE", 's');
+    list_append(self.best, (unitype) 538.207132, 'd');
+    list_append(self.best, (unitype) "TARSE", 's');
+    list_append(self.best, (unitype) 538.430354, 'd');
+    list_append(self.best, (unitype) "RAINE", 's');
+    list_append(self.best, (unitype) 548.068215, 'd');
+    list_append(self.best, (unitype) "ARTEL", 's');
+    list_append(self.best, (unitype) 552.257515, 'd');
+    list_append(self.best, (unitype) "TALER", 's');
+    list_append(self.best, (unitype) 554.553811, 'd');
+    list_append(self.best, (unitype) "RANSE", 's');
+    list_append(self.best, (unitype) 561.154634, 'd');
+    list_append(self.best, (unitype) "SATER", 's');
+    list_append(self.best, (unitype) 566.059984, 'd');
+    list_append(self.best, (unitype) "OLATE", 's');
+    list_append(self.best, (unitype) 573.138173, 'd');
+    list_append(self.best, (unitype) "RATEL", 's');
+    list_append(self.best, (unitype) 574.619655, 'd');
+    list_append(self.best, (unitype) "AESIR", 's');
+    list_append(self.best, (unitype) 574.998256, 'd');
+    list_append(self.best, (unitype) "ARLES", 's');
+    list_append(self.best, (unitype) 575.072330, 'd');
+    list_append(self.best, (unitype) "REALO", 's');
+    list_append(self.best, (unitype) 575.615540, 'd');
+    list_append(self.best, (unitype) "ALTER", 's');
+    list_append(self.best, (unitype) 576.034293, 'd');
+    list_append(self.best, (unitype) "SANER", 's');
+    list_append(self.best, (unitype) 577.310013, 'd');
+    list_append(self.best, (unitype) "LATER", 's');
+    list_append(self.best, (unitype) 578.240054, 'd');
+    list_append(self.best, (unitype) "SNARE", 's');
+    list_append(self.best, (unitype) 586.569272, 'd');
+    list_append(self.best, (unitype) "OATER", 's');
+    list_append(self.best, (unitype) 587.977680, 'd');
+    list_append(self.best, (unitype) "SALET", 's');
+    list_append(self.best, (unitype) 588.232824, 'd');
+    list_append(self.best, (unitype) "TASER", 's');
+    list_append(self.best, (unitype) 588.273976, 'd');
+    list_append(self.best, (unitype) "STARE", 's');
+    list_append(self.best, (unitype) 588.445815, 'd');
+    list_append(self.best, (unitype) "TARES", 's');
+    list_append(self.best, (unitype) 590.817186, 'd');
+    list_append(self.best, (unitype) "SLATE", 's');
+    list_append(self.best, (unitype) 591.096021, 'd');
+    list_append(self.best, (unitype) "ALERT", 's');
+    list_append(self.best, (unitype) 591.342935, 'd');
+    list_append(self.best, (unitype) "REAIS", 's');
+    list_append(self.best, (unitype) 591.459161, 'd');
+    list_append(self.best, (unitype) "SERIA", 's');
+    list_append(self.best, (unitype) 592.578503, 'd');
+    list_append(self.best, (unitype) "LARES", 's');
+    list_append(self.best, (unitype) 592.734881, 'd');
+    list_append(self.best, (unitype) "REAST", 's');
+    list_append(self.best, (unitype) 592.932412, 'd');
+    list_append(self.best, (unitype) "STRAE", 's');
+    list_append(self.best, (unitype) 593.697844, 'd');
+    list_append(self.best, (unitype) "LASER", 's');
+    list_append(self.best, (unitype) 596.331589, 'd');
+    list_append(self.best, (unitype) "SAINE", 's');
+    list_append(self.best, (unitype) 600.808955, 'd');
+    list_append(self.best, (unitype) "RALES", 's');
+    list_append(self.best, (unitype) 602.808955, 'd');
+    list_append(self.best, (unitype) "URATE", 's');
+    list_append(self.best, (unitype) 603.072330, 'd');
+    list_append(self.best, (unitype) "CRATE", 's');
+    list_append(self.best, (unitype) 603.737996, 'd');
+    list_append(self.best, (unitype) "SERAI", 's');
+    list_append(self.best, (unitype) 603.944758, 'd');
+    list_append(self.best, (unitype) "TOILE", 's');
+    list_append(self.best, (unitype) 605.088791, 'd');
+    list_append(self.best, (unitype) "SERAL", 's');
+    list_append(self.best, (unitype) 605.442700, 'd');
+    list_append(self.best, (unitype) "RATES", 's');
+    list_append(self.best, (unitype) 607.813071, 'd');
+    list_append(self.best, (unitype) "CARTE", 's');
+    list_append(self.best, (unitype) 609.607309, 'd');
+    list_append(self.best, (unitype) "ALOSE", 's');
+    list_append(self.best, (unitype) 610.701959, 'd');
+    list_append(self.best, (unitype) "ANTRE", 's');
+    list_append(self.best, (unitype) 613.681383, 'd');
+    list_append(self.best, (unitype) "SLANE", 's');
+    list_append(self.best, (unitype) 614.084675, 'd');
+    list_append(self.best, (unitype) "TRACE", 's');
+    list_append(self.best, (unitype) 614.412894, 'd');
+    list_append(self.best, (unitype) "COATE", 's');
+    list_append(self.best, (unitype) 619.047638, 'd');
+    list_append(self.best, (unitype) "CARLE", 's');
+    list_append(self.best, (unitype) 620.701959, 'd');
+    list_append(self.best, (unitype) "CARSE", 's');
+    list_append(self.best, (unitype) 622.150519, 'd');
+    list_append(self.best, (unitype) "STOAE", 's');
+    list_append(self.best, (unitype) 622.759573, 'd');
+    list_append(self.best, (unitype) "REALS", 's');
+    list_append(self.best, (unitype) 623.171095, 'd');
+    list_append(self.best, (unitype) "TERAI", 's');
+    list_append(self.best, (unitype) 625.105252, 'd');
+    list_append(self.best, (unitype) "AEROS", 's');
+    list_append(self.best, (unitype) 625.673153, 'd');
+    list_append(self.best, (unitype) "LIANE", 's');
+    list_append(self.best, (unitype) 626.356280, 'd');
+    list_append(self.best, (unitype) "RANES", 's');
+    list_append(self.best, (unitype) 626.792494, 'd');
+    list_append(self.best, (unitype) "TEARS", 's');
+    list_append(self.best, (unitype) 628.010601, 'd');
+    list_append(self.best, (unitype) "CARET", 's');
+    list_append(self.best, (unitype) 629.459161, 'd');
+    list_append(self.best, (unitype) "STALE", 's');
+    list_append(self.best, (unitype) 629.499313, 'd');
+    list_append(self.best, (unitype) "ALURE", 's');
+    list_append(self.best, (unitype) 630.199902, 'd');
+    list_append(self.best, (unitype) "SACRE", 's');
+    list_append(self.best, (unitype) 632.348050, 'd');
+    list_append(self.best, (unitype) "SLIER", 's');
+    list_append(self.best, (unitype) 632.792494, 'd');
+    list_append(self.best, (unitype) "RESAT", 's');
+    list_append(self.best, (unitype) 633.574387, 'd');
+    list_append(self.best, (unitype) "SOREL", 's');
+    list_append(self.best, (unitype) 634.076445, 'd');
+    list_append(self.best, (unitype) "TALES", 's');
+    list_append(self.best, (unitype) 634.808955, 'd');
+    list_append(self.best, (unitype) "NARES", 's');
+    list_append(self.best, (unitype) 634.858338, 'd');
+    list_append(self.best, (unitype) "AISLE", 's');
+    list_append(self.best, (unitype) 635.071330, 'd');
+    list_append(self.best, (unitype) "LITRE", 's');
+    list_append(self.best, (unitype) 636.348050, 'd');
+    list_append(self.best, (unitype) "SAICE", 's');
+    list_append(self.best, (unitype) 638.208132, 'd');
+    list_append(self.best, (unitype) "LEARN", 's');
+    list_append(self.best, (unitype) 639.375857, 'd');
+    list_append(self.best, (unitype) "EARNT", 's');
+    list_append(self.best, (unitype) 640.562042, 'd');
+    list_append(self.best, (unitype) "ORIEL", 's');
+    list_append(self.best, (unitype) 640.594964, 'd');
+    list_append(self.best, (unitype) "EARST", 's');
+    list_append(self.best, (unitype) 641.006486, 'd');
+    list_append(self.best, (unitype) "LEARS", 's');
+    list_append(self.best, (unitype) 641.171095, 'd');
+    list_append(self.best, (unitype) "PAIRE", 's');
+    list_append(self.best, (unitype) 641.566157, 'd');
+    list_append(self.best, (unitype) "REOIL", 's');
+    list_append(self.best, (unitype) 642.891260, 'd');
+    list_append(self.best, (unitype) "ALONE", 's');
+    list_append(self.best, (unitype) 644.355280, 'd');
+    list_append(self.best, (unitype) "TERAS", 's');
+    list_append(self.best, (unitype) 644.784264, 'd');
+    list_append(self.best, (unitype) "URASE", 's');
+    list_append(self.best, (unitype) 644.998256, 'd');
+    list_append(self.best, (unitype) "LEANT", 's');
+    list_append(self.best, (unitype) 645.277091, 'd');
+    list_append(self.best, (unitype) "ALOES", 's');
+    list_append(self.best, (unitype) 646.191671, 'd');
+    list_append(self.best, (unitype) "TORSE", 's');
+    list_append(self.best, (unitype) 651.903605, 'd');
+    list_append(self.best, (unitype) "ASTER", 's');
+    list_append(self.best, (unitype) 653.138173, 'd');
+    list_append(self.best, (unitype) "ARETS", 's');
+    list_append(self.best, (unitype) 653.854223, 'd');
+    list_append(self.best, (unitype) "LEAST", 's');
+    list_append(self.best, (unitype) 654.133058, 'd');
+    list_append(self.best, (unitype) "SOLER", 's');
+    list_append(self.best, (unitype) 654.759573, 'd');
+    list_append(self.best, (unitype) "REANS", 's');
+    list_append(self.best, (unitype) 655.113482, 'd');
+    list_append(self.best, (unitype) "RETIA", 's');
+    list_append(self.best, (unitype) 657.549696, 'd');
+    list_append(self.best, (unitype) "LATEN", 's');
+    list_append(self.best, (unitype) 657.837762, 'd');
+    list_append(self.best, (unitype) "SILER", 's');
+    list_append(self.best, (unitype) 658.693729, 'd');
+    list_append(self.best, (unitype) "ANOLE", 's');
+    list_append(self.best, (unitype) 658.817186, 'd');
+    list_append(self.best, (unitype) "CRANE", 's');
+    list_append(self.best, (unitype) 659.392317, 'd');
+    list_append(self.best, (unitype) "CARNE", 's');
+    list_append(self.best, (unitype) 659.582618, 'd');
+    list_append(self.best, (unitype) "TRONE", 's');
+    list_append(self.best, (unitype) 660.150519, 'd');
+    list_append(self.best, (unitype) "LAERS", 's');
+    list_append(self.best, (unitype) 660.677268, 'd');
+    list_append(self.best, (unitype) "EARLS", 's');
+    list_append(self.best, (unitype) 661.171095, 'd');
 }
