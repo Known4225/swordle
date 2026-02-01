@@ -7,6 +7,7 @@ Valid answers source: https://gist.github.com/cfreshman/a03ef2cba789d8cf00c08f76
 
 #include "turtle.h"
 #include <time.h>
+#include <pthread.h>
 
 enum {
     S_KEY_LMB = 0,
@@ -22,6 +23,8 @@ typedef enum {
     SWORDLE_COLOR_GREY = 3, // also the same as border non-highlighted
     SWORDLE_COLOR_BORDER_HIGHLIGHT = 4,
     SWORDLE_COLOR_BACKGROUND = 5,
+    SWORDLE_COLOR_KEYBOARD = 6,
+    SWORDLE_COLOR_SIDEBAR = 7,
 } swordle_color_t;
 
 typedef struct {
@@ -37,6 +40,29 @@ typedef struct {
     char keys[8];
     list_t *possibleWords;
     list_t *allWords;
+    list_t *canvasPossible;
+    list_t *best;
+    /* sidebars */
+    double bestX;
+    int32_t bestIndex;
+    double bestOffset;
+    tt_scrollbar_t *bestScrollbar;
+    double possibleX;
+    int32_t possibleIndex;
+    double possibleOffset;
+    tt_scrollbar_t *possibleScrollbar;
+    /* keyboard */
+    double keyX[3]; // top, middle, bottom
+    double keyY; // top left
+    double keyDropX; // key width
+    double keyDropSpecialX; // key width of ENTER and BACKSPACE keys
+    double keyDropY; // key height
+    double keyPercentage; // value from 0 to 1 that determines how big the key is relative to the keyDropX * keyDropY area
+    /* solver thread */
+    volatile int8_t solving;
+    volatile int8_t solverThreadExists;
+
+    int32_t tick;
 } swordle_t;
 
 swordle_t self;
@@ -95,6 +121,11 @@ int32_t simulate(char *canvas, list_t *possibleWords) {
                     whitelist[i] = lookup[canvas[j * 10 + i * 2] - 65]; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:
+                    for (int32_t k = 0; k < i; k++) {
+                        if (canvas[j * 10 + k * 2] == canvas[j * 10 + i * 2] && canvas[j * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
+                            return 0;
+                        }
+                    }
                     currentCount[canvas[j * 10 + i * 2] - 65]++;
                     whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 65]; // canvas uses capital letters
                 break;
@@ -154,7 +185,8 @@ int32_t simulate(char *canvas, list_t *possibleWords) {
 }
 
 /* Algorithm: minimise number of possible words, returns a list of all possible words (given current canvas) */
-list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *allWords) {
+list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *possibleWords, list_t *allWords) {
+    list_t *canvasPossible = list_init();
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
     uint32_t lookup[26];
@@ -178,6 +210,12 @@ list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *
                     whitelist[i] = lookup[canvas[j * 10 + i * 2] - 65]; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:
+                    for (int32_t k = 0; k < i; k++) {
+                        if (canvas[j * 10 + k * 2] == canvas[j * 10 + i * 2] && canvas[j * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
+                            printf("bestWord: Invalid canvas configuration\n");
+                            return canvasPossible;
+                        }
+                    }
                     currentCount[canvas[j * 10 + i * 2] - 65]++;
                     whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 65]; // canvas uses capital letters
                 break;
@@ -209,7 +247,6 @@ list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *
     // printf("\n");
     // printf("%X %X %X %X %X\n", whitelist[0], whitelist[1], whitelist[2], whitelist[3], whitelist[4]);
     /* gather all possible words */
-    list_t *canvasPossible = list_init();
     for (int32_t i = 0; i < possibleWords -> length; i++) {
         char *word = possibleWords -> data[i].s;
         char good = 1;
@@ -261,7 +298,6 @@ list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *
         }
         double mean = 0;
         int32_t values[243];
-        // printf("%s ", allWords -> data[i].s);
         for (int32_t j = 0; j < 243; j++) {
             values[j] = simulate(proposedCanvas, canvasPossible);
             mean += values[j];
@@ -286,6 +322,7 @@ list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *
                 }
             }
         }
+        // printf("%s ", allWords -> data[i].s);
         // printf("total: %lf ", mean);
         mean /= 243.0;
         /* take variance */
@@ -297,24 +334,48 @@ list_t *bestWord(char *returnWord, char *canvas, list_t *possibleWords, list_t *
         // printf("variance: %lf\n", v);
         list_append(variance, (unitype) v, 'd');
     }
-    double minv = variance -> data[0].d;
-    int32_t mindex = 0;
     for (int32_t i = 0; i < allWords -> length; i++) {
-        double epsilon = 0.001;
+        double epsilon = 0.001; // arbitrary advantage towards words that could actually be the word - meant only to break ties between these words and other words that separate all remaining possible words into distinct cases (i would prefer one of those cases to be all green if possible)
         if (list_find(canvasPossible, allWords -> data[i], 's') != -1) {
             variance -> data[i].d -= epsilon;
         }
-        if (variance -> data[i].d < minv) {
-            minv = variance -> data[i].d;
-            mindex = i;
-        }
-        if (list_find(canvasPossible, allWords -> data[i], 's') != -1) {
-            printf("%s variance: %lf\n", allWords -> data[i].s, variance -> data[i].d);
+    }
+    list_t *order = list_sort_index_double(variance);
+    int32_t gatherTop = 25;
+    if (order -> length < gatherTop) {
+        gatherTop = order -> length;
+    }
+    for (int32_t i = 0; i < gatherTop; i++) {
+        list_append(bestWords, allWords -> data[order -> data[order -> length - i - 1].i], 's');
+        list_append(bestWords, variance -> data[order -> data[order -> length - i - 1].i], 'd');
+    }
+    // printf("%s variance: %lf\n", allWords -> data[order -> data[order -> length - 1].i].s, variance -> data[order -> data[order -> length - 1].i].d);
+    memcpy(returnWord, allWords -> data[order -> data[order -> length - 1].i].s, 6);
+    list_free(order);
+    return canvasPossible;
+}
+
+void *solverThread(void *arg) {
+    while (self.solverThreadExists) {
+        if (self.solving == 1) {
+            self.solving = 2;
+            char word[6] = {0};
+            list_t *best = list_init();
+            list_t *canvasPossible = bestWord(word, best, self.canvas, self.possibleWords, self.allWords);
+            list_copy(self.best, best);
+            list_copy(self.canvasPossible, canvasPossible);
+            list_free(best);
+            list_free(canvasPossible);
+            self.solving = 0;
         }
     }
-    printf("%s variance: %lf\n", allWords -> data[mindex].s, minv);
-    memcpy(returnWord, allWords -> data[mindex].s, 6);
-    return canvasPossible;
+}
+
+BOOL WINAPI swordleSignal(DWORD signal) {
+    if (signal == CTRL_C_EVENT) {
+        self.solverThreadExists = 0;
+    }
+    return 0;
 }
 
 void init() {
@@ -337,10 +398,20 @@ void init() {
         58, 58, 60,
         86, 87, 88,
         18, 18, 19,
+        129, 131, 132,
+        9, 9, 10,
     };
     memcpy(self.colors, copyColors, sizeof(copyColors));
     /* keyboard */
     turtle.unicodeCallback = swordleUnicodeCallback;
+    self.keyX[0] = -115;
+    self.keyX[1] = -103;
+    self.keyX[2] = -115;
+    self.keyY = -50;
+    self.keyDropX = 23.23;
+    self.keyDropY = -32;
+    self.keyDropSpecialX = 35.23;
+    self.keyPercentage = 0.87;
     /* load words */
     self.possibleWords = list_init();
     FILE *possiblefp = fopen("wordle-answers-alphabetical.txt", "r");
@@ -372,9 +443,50 @@ void init() {
         }
         fclose(allfp);
     }
+    self.canvasPossible = list_init();
+    self.best = list_init();
+    /* sidebars */
+    self.bestX = -250;
+    self.bestIndex = 0;
+    self.bestOffset = 0;
+    self.bestScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.bestX - 62, -8, 6, 330, 50);
+    self.possibleX = 250;
+    self.possibleIndex = 0;
+    self.possibleOffset = 0;
+    self.possibleScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.possibleX + 62, -8, 6, 330, 50);
+
+    /* solver thread */
+    self.solverThreadExists = 1;
+    self.solving = 0;
+    pthread_t solverThreadVar;
+    pthread_create(&solverThreadVar, NULL, solverThread, NULL);
+    /* signal handler */
+    SetConsoleCtrlHandler(swordleSignal, TRUE);
 }
 
-void render() {
+void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double radius) {
+    if (x1 > x2) {
+        double temp = x1;
+        x1 = x2;
+        x2 = temp;
+    }
+    if (y1 > y2) {
+        double temp = y1;
+        y1 = y2;
+        y2 = temp;
+    }
+    turtlePenSize(radius * 2);
+    turtleGoto(x1 + radius, y1 + radius);
+    turtlePenDown();
+    turtleGoto(x1 + radius, y2 - radius);
+    turtleGoto(x2 - radius, y2 - radius);
+    turtleGoto(x2 - radius, y1 + radius);
+    turtleGoto(x1 + radius, y1 + radius);
+    turtlePenUp();
+    turtleRectangle(x1 + radius, y1 + radius, x2 - radius, y2 - radius);
+}
+
+void renderCanvas() {
     /* render mouse position */
     tt_setColor(TT_COLOR_TEXT);
     turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
@@ -417,6 +529,165 @@ void render() {
         ypos += self.dropY;
     }
     /* render keyboard */
+    char keys[] = {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '1', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '2'};
+    double xpos = self.keyX[0];
+    ypos = self.keyY;
+    for (int32_t i = 0; i < 10; i++) {
+        swordle_setColor(SWORDLE_COLOR_KEYBOARD);
+        turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropX * self.keyPercentage, ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
+        char string[2] = {0, 0};
+        string[0] = keys[i];
+        swordle_setColor(SWORDLE_COLOR_TEXT);
+        turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+        xpos += self.keyDropX;
+    }
+    ypos += self.keyDropY;
+    xpos = self.keyX[1];
+    for (int32_t i = 0; i < 9; i++) {
+        swordle_setColor(SWORDLE_COLOR_KEYBOARD);
+        turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropX * self.keyPercentage, ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
+        char string[2] = {0, 0};
+        string[0] = keys[i + 10];
+        swordle_setColor(SWORDLE_COLOR_TEXT);
+        turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+        xpos += self.keyDropX;
+    }
+    ypos += self.keyDropY;
+    xpos = self.keyX[2];
+    for (int32_t i = 0; i < 9; i++) {
+        if (keys[i + 19] == '1') {
+            /* enter key */
+            swordle_setColor(SWORDLE_COLOR_KEYBOARD);
+            turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage), ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtleTextWriteString("ENTER", (xpos * 2 + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage)) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5) / 2, 50);
+            xpos += self.keyDropSpecialX;
+        } else if (keys[i + 19] == '2') {
+            /* backspace key */
+            swordle_setColor(SWORDLE_COLOR_KEYBOARD);
+            turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage), ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtlePenSize(1);
+            double symbolSize = 4;
+            double centerX = (xpos * 2 + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage)) / 2 - symbolSize * 0.75;
+            double centerY = (ypos * 2 + self.keyDropY * self.keyPercentage) / 2;
+            turtleGoto(centerX - symbolSize * 0.75, centerY);
+            turtlePenDown();
+            turtleGoto(centerX, centerY - symbolSize);
+            turtleGoto(centerX + symbolSize * 2, centerY - symbolSize);
+            turtleGoto(centerX + symbolSize * 2, centerY + symbolSize);
+            turtleGoto(centerX, centerY + symbolSize);
+            turtleGoto(centerX - symbolSize * 0.75, centerY);
+            turtlePenUp();
+            centerX += symbolSize * 0.9;
+            turtleGoto(centerX + symbolSize / 2, centerY + symbolSize / 2);
+            turtlePenDown();
+            turtleGoto(centerX - symbolSize / 2, centerY - symbolSize / 2);
+            turtlePenUp();
+            turtleGoto(centerX + symbolSize / 2, centerY - symbolSize / 2);
+            turtlePenDown();
+            turtleGoto(centerX - symbolSize / 2, centerY + symbolSize / 2);
+            turtlePenUp();
+        } else {
+            swordle_setColor(SWORDLE_COLOR_KEYBOARD);
+            turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropX * self.keyPercentage, ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
+            char string[2] = {0, 0};
+            string[0] = keys[i + 19];
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+            xpos += self.keyDropX;
+        }
+    }
+}
+
+void renderResults() {
+    double xpos = self.bestX;
+    double ypos = 150;
+    swordle_setColor(SWORDLE_COLOR_SIDEBAR);
+    turtleRectangle(-320, -180, xpos + 70, 180);
+    if (self.solving) {
+        tt_setColor(TT_COLOR_YELLOW);
+        int32_t splitter = self.tick % 400;
+        if (splitter < 100) {
+            turtleTextWriteString("Searching", xpos, 0, 10, 50);
+        } else if (splitter < 200) {
+            turtleTextWriteString("Searching.", xpos, 0, 10, 50);
+        } else if (splitter < 300) {
+            turtleTextWriteString("Searching..", xpos, 0, 10, 50);
+        } else {
+            turtleTextWriteString("Searching...", xpos, 0, 10, 50);
+        }
+    } else {
+        if (self.best -> length == 0) {
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtleTextWriteString("No Best Words", xpos, 0, 10, 50);
+        } else {
+            swordle_setColor(SWORDLE_COLOR_TEXT);
+            turtleTextWriteString("Best", xpos - 30, ypos, 10, 50);
+            turtleTextWriteString("Variance", xpos + 30, ypos, 10, 50);
+            ypos -= 20;
+            for (int32_t i = 0; i < self.best -> length; i += 2) {
+                turtleTextWriteString(self.best -> data[i].s, xpos - 30, ypos, 6, 50);
+                turtleTextWriteStringf(xpos + 30, ypos, 6, 50, "%.3lf", self.best -> data[i + 1].d);
+                ypos -= 12;
+            }
+        }
+    }
+    xpos = self.possibleX;
+    ypos = 150;
+    swordle_setColor(SWORDLE_COLOR_SIDEBAR);
+    turtleRectangle(320, -180, xpos - 70, 180);
+    if (self.solving) {
+        tt_setColor(TT_COLOR_YELLOW);
+        int32_t splitter = self.tick % 400;
+        if (splitter < 100) {
+            turtleTextWriteString("Searching", xpos, 0, 10, 50);
+        } else if (splitter < 200) {
+            turtleTextWriteString("Searching.", xpos, 0, 10, 50);
+        } else if (splitter < 300) {
+            turtleTextWriteString("Searching..", xpos, 0, 10, 50);
+        } else {
+            turtleTextWriteString("Searching...", xpos, 0, 10, 50);
+        }
+    } else {
+        list_t *selectList;
+        if (self.canvasPossible -> length == 0) {
+            // swordle_setColor(SWORDLE_COLOR_TEXT);
+            // turtleTextWriteString("No Possible Words", xpos, 0, 10, 50);
+            selectList = self.possibleWords;
+        } else {
+            selectList = self.canvasPossible;
+        }
+        swordle_setColor(SWORDLE_COLOR_TEXT);
+        ypos -= 20;
+        self.possibleIndex = 0;
+        self.possibleOffset = 0;
+        if (selectList -> length > 26) {
+            self.possibleScrollbar -> enabled = TT_ELEMENT_ENABLED;
+            self.possibleScrollbar -> barPercentage = 100 / (selectList -> length / 26);
+            double divisor = selectList -> length * 100.0 / (selectList -> length - 26);
+            self.possibleOffset = self.possibleScrollbar -> value * selectList -> length / divisor * 12;
+            while (self.possibleOffset > 12) {
+                self.possibleOffset -= 12;
+                self.possibleIndex++;
+            }
+        } else {
+            self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+        }
+        ypos += self.possibleOffset;
+        int32_t possibleEnding = self.possibleIndex + 30;
+        if (possibleEnding > selectList -> length) {
+            possibleEnding = selectList -> length;
+        }
+        for (int32_t i = self.possibleIndex; i < possibleEnding; i++) {
+            turtleTextWriteString(selectList -> data[i].s, xpos, ypos, 6, 50);
+            ypos -= 12;
+        }
+        swordle_setColor(SWORDLE_COLOR_SIDEBAR);
+        turtleRectangle(320, 150 - 16, xpos - 70, 180);
+        swordle_setColor(SWORDLE_COLOR_TEXT);
+        turtleTextWriteString("Possible", xpos, 150, 10, 50);
+    }
 }
 
 void mouseTick() {
@@ -437,11 +708,11 @@ void mouseTick() {
         if (self.keys[S_KEY_ENTER] == 0) {
             self.keys[S_KEY_ENTER] = 1;
             if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
-                char word[6] = {0};
-                list_t *canvasPossible = bestWord(word, self.canvas, self.possibleWords, self.allWords);
-                printf("%s %d\n", word, canvasPossible -> length);
-                list_print(canvasPossible);
-                list_free(canvasPossible);
+                self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+                self.possibleScrollbar -> value = 0;
+                self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+                self.bestScrollbar -> value = 0;
+                self.solving = 1;
             }
         }
     } else {
@@ -468,6 +739,14 @@ void mouseTick() {
     } else {
         self.keys[S_KEY_BACKSPACE] = 0;
     }
+    double scroll = turtleMouseWheel();
+    if (scroll > 0) {
+        // if () {
+        //     self.
+        // }
+    } else if (scroll < 0) {
+        
+    }
 }
 
 void parseRibbonOutput() {
@@ -478,13 +757,14 @@ void parseRibbonOutput() {
     if (tt_ribbon.output[1] == 0) { // File
         if (tt_ribbon.output[2] == 1) { // New
             list_clear(osToolsFileDialog.selectedFilenames);
-            printf("New\n");
             /* initialise canvas */
             for (int32_t i = 0; i < 60; i += 2) {
                 self.canvas[i] = 0;
                 self.canvas[i + 1] = SWORDLE_COLOR_BORDER_HIGHLIGHT;
             }
             self.cursorIndex = 0;
+            list_clear(self.best);
+            list_clear(self.canvasPossible);
         }
         if (tt_ribbon.output[2] == 2) { // Save
             if (osToolsFileDialog.selectedFilenames -> length == 0) {
@@ -582,15 +862,15 @@ int main(int argc, char *argv[]) {
     char constructedFilepath[5120];
     strcpy(constructedFilepath, osToolsFileDialog.executableFilepath);
     strcat(constructedFilepath, "images/thumbnail.jpg");
-    uint8_t *iconPixels = stbi_load(constructedFilepath, &icon.width, &icon.height, &iconChannels, 4); // 4 color channels for RGBA
-    if (iconPixels != NULL) {
-        icon.pixels = iconPixels;
-        glfwSetWindowIcon(window, 1, &icon);
-        glfwPollEvents(); // update taskbar icon correctly on windows - https://github.com/glfw/glfw/issues/2753
-        free(iconPixels);
-    } else {
-        printf("Could not load thumbnail %s\n", constructedFilepath);
-    }
+    // uint8_t *iconPixels = stbi_load(constructedFilepath, &icon.width, &icon.height, &iconChannels, 4); // 4 color channels for RGBA
+    // if (iconPixels != NULL) {
+    //     icon.pixels = iconPixels;
+    //     glfwSetWindowIcon(window, 1, &icon);
+    //     glfwPollEvents(); // update taskbar icon correctly on windows - https://github.com/glfw/glfw/issues/2753
+    //     free(iconPixels);
+    // } else {
+    //     printf("Could not load thumbnail %s\n", constructedFilepath);
+    // }
 
     /* initialise turtle */
     turtleInit(window, -320, -180, 320, 180);
@@ -624,14 +904,14 @@ int main(int argc, char *argv[]) {
     init();
 
     uint32_t tps = 120; // ticks per second (locked to fps in this case)
-    uint64_t tick = 0; // count number of ticks since application started
     clock_t start, end;
 
     while (turtle.close == 0) {
         start = clock();
         turtleGetMouseCoords();
         turtleClear();
-        render();
+        renderCanvas();
+        renderResults();
         mouseTick();
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
@@ -640,8 +920,9 @@ int main(int argc, char *argv[]) {
         while ((double) (end - start) / CLOCKS_PER_SEC < (1.0 / tps)) {
             end = clock();
         }
-        tick++;
+        self.tick++;
     }
+    self.solverThreadExists = 0;
     turtleFree();
     glfwTerminate();
     return 0;
