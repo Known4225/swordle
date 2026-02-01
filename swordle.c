@@ -61,6 +61,7 @@ typedef struct {
     char keyboard[28]; // keys in order
     char keyboardMap[28]; // maps 0 to 26 to the respective key indices
     char keyboardColors[28]; // colors of each key in order
+    int32_t keyIndex; // canvas hover index
     /* solver thread */
     volatile int8_t solving;
     volatile int8_t solverThreadExists;
@@ -429,6 +430,7 @@ void init() {
     char keymap[] = {10, 24, 22, 12, 2, 13, 14, 15, 7, 16, 17, 18, 26, 25, 8, 9, 0, 3, 11, 4, 6, 23, 1, 21, 5, 20, -1, -1};
     memcpy(self.keyboard, keys, 28);
     memcpy(self.keyboardMap, keymap, 28);
+    self.keyIndex = -1;
     /* load words */
     self.possibleWords = list_init();
     FILE *possiblefp = fopen("wordle-answers-alphabetical.txt", "r");
@@ -548,7 +550,6 @@ void renderCanvas() {
         }
         ypos += self.dropY;
     }
-    /* render keyboard */
     /* get keyboard colours */
     memset(self.keyboardColors, SWORDLE_COLOR_KEYBOARD, 28);
     for (int32_t j = 0; j < self.cursorIndex; j++) {
@@ -556,6 +557,8 @@ void renderCanvas() {
             self.keyboardColors[self.keyboardMap[self.canvas[j * 2] - 'A']] = self.canvas[j * 2 + 1];
         }
     }
+    /* render keyboard */
+    self.keyIndex = -1;
     double xpos = self.keyX[0];
     ypos = self.keyY;
     for (int32_t i = 0; i < 10; i++) {
@@ -565,6 +568,9 @@ void renderCanvas() {
         string[0] = self.keyboard[i];
         swordle_setColor(SWORDLE_COLOR_TEXT);
         turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+        if (turtle.mouseX >= xpos && turtle.mouseX <= xpos + self.keyDropX * self.keyPercentage && turtle.mouseY >= ypos + self.keyDropY * self.keyPercentage && turtle.mouseY <= ypos) {
+            self.keyIndex = i;
+        }
         xpos += self.keyDropX;
     }
     ypos += self.keyDropY;
@@ -576,6 +582,9 @@ void renderCanvas() {
         string[0] = self.keyboard[i + 10];
         swordle_setColor(SWORDLE_COLOR_TEXT);
         turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+        if (turtle.mouseX >= xpos && turtle.mouseX <= xpos + self.keyDropX * self.keyPercentage && turtle.mouseY >= ypos + self.keyDropY * self.keyPercentage && turtle.mouseY <= ypos) {
+            self.keyIndex = i + 10;
+        }
         xpos += self.keyDropX;
     }
     ypos += self.keyDropY;
@@ -587,6 +596,9 @@ void renderCanvas() {
             turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage), ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
             swordle_setColor(SWORDLE_COLOR_TEXT);
             turtleTextWriteString("ENTER", (xpos * 2 + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage)) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5) / 2, 50);
+            if (turtle.mouseX >= xpos && turtle.mouseX <= xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage) && turtle.mouseY >= ypos + self.keyDropY * self.keyPercentage && turtle.mouseY <= ypos) {
+                self.keyIndex = i + 19;
+            }
             xpos += self.keyDropSpecialX;
         } else if (self.keyboard[i + 19] == '2') {
             /* backspace key */
@@ -614,6 +626,9 @@ void renderCanvas() {
             turtlePenDown();
             turtleGoto(centerX - symbolSize / 2, centerY + symbolSize / 2);
             turtlePenUp();
+            if (turtle.mouseX >= xpos && turtle.mouseX <= xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage) && turtle.mouseY >= ypos + self.keyDropY * self.keyPercentage && turtle.mouseY <= ypos) {
+                self.keyIndex = i + 19;
+            }
         } else {
             swordle_setColor(self.keyboardColors[i + 19]);
             turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropX * self.keyPercentage, ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
@@ -621,6 +636,9 @@ void renderCanvas() {
             string[0] = self.keyboard[i + 19];
             swordle_setColor(SWORDLE_COLOR_TEXT);
             turtleTextWriteString(string, (xpos * 2 + self.keyDropX * self.keyPercentage) / 2, (ypos * 2 + self.keyDropY * self.keyPercentage) / 2, fabs(self.keyDropX * 0.5), 50);
+            if (turtle.mouseX >= xpos && turtle.mouseX <= xpos + self.keyDropX * self.keyPercentage && turtle.mouseY >= ypos + self.keyDropY * self.keyPercentage && turtle.mouseY <= ypos) {
+                self.keyIndex = i + 19;
+            }
             xpos += self.keyDropX;
         }
     }
@@ -761,6 +779,31 @@ void mouseTick() {
                 self.canvas[self.mouseIndex * 2 + 1]--;
                 if (self.canvas[self.mouseIndex * 2 + 1] < SWORDLE_COLOR_GREEN) {
                     self.canvas[self.mouseIndex * 2 + 1] = SWORDLE_COLOR_GREY;
+                }
+            }
+            if (self.keyIndex != -1) {
+                if (self.keyboard[self.keyIndex] >= 65 && self.keyboard[self.keyIndex] <= 90 && self.cursorIndex < 30) {
+                    self.canvas[self.cursorIndex * 2] = self.keyboard[self.keyIndex];
+                    if (self.canvas[self.cursorIndex * 2 + 1] == SWORDLE_COLOR_BORDER_HIGHLIGHT) {
+                        self.canvas[self.cursorIndex * 2 + 1] = SWORDLE_COLOR_GREY;
+                    }
+                    self.cursorIndex++;
+                } else if (self.keyboard[self.keyIndex] == '1') {
+                    /* enter */
+                    if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
+                        self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+                        self.possibleScrollbar -> value = 0;
+                        self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+                        self.bestScrollbar -> value = 0;
+                        self.solving = 1;
+                    }
+                } else if (self.keyboard[self.keyIndex] == '2') {
+                    /* backspace */
+                    if (self.cursorIndex > 0) {
+                        self.cursorIndex--;
+                        self.canvas[self.cursorIndex * 2] = 0;
+                        self.canvas[self.cursorIndex * 2 + 1] = SWORDLE_COLOR_BORDER_HIGHLIGHT;
+                    }
                 }
             }
         }
