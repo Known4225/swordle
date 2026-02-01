@@ -7,7 +7,6 @@ Use the keyboard to enter words, press enter to calculate possible words and cal
 # TODO
 - Optimize simulation to not have to redo work on non-changing top words
 - Make keyboard functional
-- Searching progress bar
 - Optimize the program so it runs faster
 - Collect gambits
 - Save and load files?
