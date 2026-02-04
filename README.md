@@ -12,4 +12,4 @@ Use the keyboard to enter words, click on letters to cycle through colors, press
 
 # Images
 
-![example](images/example.JPG)
+![example](images/example.jpg)

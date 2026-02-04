@@ -847,11 +847,31 @@ void mouseTick() {
     }
     double scroll = turtleMouseWheel();
     if (scroll > 0) {
-        // if () {
-        //     self.
-        // }
+        if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+            self.bestScrollbar -> value -= self.bestScrollbar -> barPercentage / 25;
+            if (self.bestScrollbar -> value < 0) {
+                self.bestScrollbar -> value = 0;
+            }
+        }
+        if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+            self.possibleScrollbar -> value -= self.possibleScrollbar -> barPercentage / 25;
+            if (self.possibleScrollbar -> value < 0) {
+                self.possibleScrollbar -> value = 0;
+            }
+        }
     } else if (scroll < 0) {
-        
+        if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+            self.bestScrollbar -> value += self.bestScrollbar -> barPercentage / 25;
+            if (self.bestScrollbar -> value > 100) {
+                self.bestScrollbar -> value = 100;
+            }
+        }
+        if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+            self.possibleScrollbar -> value += self.possibleScrollbar -> barPercentage / 25;
+            if (self.possibleScrollbar -> value > 100) {
+                self.possibleScrollbar -> value = 100;
+            }
+        }
     }
 }
 
