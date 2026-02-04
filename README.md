@@ -6,7 +6,7 @@ Run `swordle.exe`
 
 You can also build the binary yourself with
 ```
-gcc swordle.c -L./Windows -lturtle -lglfw3 -lopengl32 -lgdi32 -lglad -lole32 -luuid -lwsock32 -lWs2_32 -lMf -lMfplat -lmfreadwrite -lmfuuid -DOS_WINDOWS -O3 -o swordle.exe
+gcc swordle.c -L./Windows -lturtle -lglfw3 -lopengl32 -lgdi32 -lglad -lole32 -luuid -DOS_WINDOWS -O3 -o swordle.exe
 ```
 on windows or
 ```
