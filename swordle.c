@@ -42,6 +42,7 @@ typedef struct {
     list_t *allWords;
     list_t *canvasPossible;
     list_t *best;
+    tt_switch_t *hardModeSwitch; // hard mode switch
     /* sidebars */
     double bestX;
     int32_t bestIndex;
@@ -473,6 +474,8 @@ void init() {
     self.possibleIndex = 0;
     self.possibleOffset = 0;
     self.possibleScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
+    self.hardModeSwitch = switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
+    self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
 
     /* solver thread */
     self.progressBest = 0;
