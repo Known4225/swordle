@@ -158,7 +158,7 @@ int32_t simulate(char *canvas, list_t *possibleWords) {
             }
         }
     }
-    /* gather all possible words */
+    /* gather number of possible words given canvas into canvasPossible */
     int32_t canvasPossible = 0;
     for (int32_t i = 0; i < possibleWords -> length; i++) {
         char *word = possibleWords -> data[i].s;
@@ -208,6 +208,7 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
         lookup[i] = pow(2, i);
     }
     uint32_t whitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF}; // so i just learned today that you can only do one of these when it is 0
+    uint32_t hardmodeWhitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF};
     for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
         for (int32_t i = 0; i < 5; i++) {
@@ -222,6 +223,7 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
                         currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
                     whitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    hardmodeWhitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:
                     for (int32_t k = 0; k < i; k++) {
@@ -295,14 +297,13 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     if (hardMode) {
         /* gather all words that could be played given canvas - see https://www.reddit.com/r/wordle/comments/1bhv6c3/whats_your_understanding_of_wordles_hard_mode/ */
         for (int32_t i = 0; i < allWords -> length; i++) {
-            self.progressPossible += 1.0 / allWords -> length;
             char *word = allWords -> data[i].s;
             char good = 1;
             int8_t currentCount[26] = {0};
             /* check whitelist */
             for (int32_t j = 0; j < 5; j++) {
                 currentCount[word[j] - 'A']++;
-                if ((whitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+                if ((hardmodeWhitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
                     good = 0;
                     break;
                 }
@@ -314,10 +315,10 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
                     break;
                 }
                 /* check if exact global count is met (if information is available) */
-                if (count[i] < 0 && currentCount[i] != -count[i]) {
-                    good = 0;
-                    break;
-                }
+                // if (count[i] < 0 && currentCount[i] != -count[i]) {
+                //     good = 0;
+                //     break;
+                // }
             }
             if (good) {
                 list_append(canvasAll, allWords -> data[i], 's');
@@ -379,7 +380,6 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
             v += (values[j] - mean) * (values[j] - mean);
         }
         v /= 243.0;
-        // printf("variance: %lf\n", v);
         list_append(variance, (unitype) v, 'd');
     }
     for (int32_t i = 0; i < canvasAll -> length; i++) {
