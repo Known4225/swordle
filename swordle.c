@@ -469,12 +469,12 @@ void init() {
     self.bestX = -250;
     self.bestIndex = 0;
     self.bestOffset = 0;
-    self.bestScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.bestX + 62, -20, 6, 306, 50);
+    self.bestScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.bestX + 62, -20, 6, 306, 50);
     self.possibleX = 250;
     self.possibleIndex = 0;
     self.possibleOffset = 0;
-    self.possibleScrollbar = scrollbarInit(NULL, TT_SCROLLBAR_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
-    self.hardModeSwitch = switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
+    self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
+    self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
 
     /* solver thread */
@@ -682,7 +682,7 @@ void renderResults() {
             int32_t bestLength = self.best -> length / 2;
             if (bestLength > 26 * 2) {
                 self.bestScrollbar -> enabled = TT_ELEMENT_ENABLED;
-                self.bestScrollbar -> barPercentage = 100 / (bestLength / 26);
+                self.bestScrollbar -> barPercentage = 100 / (bestLength / 26.0);
                 double divisor = bestLength * 100.0 / (bestLength - 26);
                 self.bestOffset = self.bestScrollbar -> value * bestLength / divisor * 12;
                 while (self.bestOffset > 12) {
@@ -748,7 +748,7 @@ void renderResults() {
         self.possibleOffset = 0;
         if (selectList -> length > 26) {
             self.possibleScrollbar -> enabled = TT_ELEMENT_ENABLED;
-            self.possibleScrollbar -> barPercentage = 100 / (selectList -> length / 26);
+            self.possibleScrollbar -> barPercentage = 100 / (selectList -> length / 26.0);
             double divisor = selectList -> length * 100.0 / (selectList -> length - 26);
             self.possibleOffset = self.possibleScrollbar -> value * selectList -> length / divisor * 12;
             while (self.possibleOffset > 12) {
@@ -1028,12 +1028,12 @@ int main(int argc, char *argv[]) {
     turtleToolsSetTheme(TT_THEME_DARK); // dark theme preset
     strcpy(constructedFilepath, osToolsFileDialog.executableFilepath);
     strcat(constructedFilepath, "config/ribbonConfig.txt");
-    ribbonInit(constructedFilepath);
+    tt_ribbonInit(constructedFilepath);
     // list_t *ribbonConfig = list_init();
     // list_append(ribbonConfig, (unitype) "File, New, Save, Save As..., Open", 's');
     // list_append(ribbonConfig, (unitype) "Edit, Undo, Redo, Cut, Copy, Paste", 's');
     // list_append(ribbonConfig, (unitype) "View, Change Theme, GLFW", 's');
-    // ribbonInitList(ribbonConfig);
+    // tt_ribbonInitList(ribbonConfig);
 
     init();
 
