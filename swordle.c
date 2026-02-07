@@ -196,8 +196,10 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     self.progressPossible = 0;
     list_t *canvasPossible = list_init(); // list of all possible words given this canvas
     list_t *canvasAll;
+    int32_t layers = 1; // how many layers deep to search
     if (hardMode) {
         canvasAll = list_init();
+        layers = 2;
     } else {
         canvasAll = allWords;
     }
