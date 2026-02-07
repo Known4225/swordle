@@ -3,6 +3,7 @@ Created by Ryan Srichai, 31.01.26
 
 All words source: https://gist.github.com/dracos/dd0668f281e685bad51479e5acaadb93#file-valid-wordle-words-txt
 Valid answers source: https://gist.github.com/cfreshman/a03ef2cba789d8cf00c08f767e0fad7b
+Past answers source: https://www.fiveforks.com/wordle/#a
 */
 
 #include "turtle.h"
@@ -191,9 +192,15 @@ int32_t simulate(char *canvas, list_t *possibleWords) {
 }
 
 /* Algorithm: minimise number of possible words, returns a list of all possible words (given current canvas) */
-list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *possibleWords, list_t *allWords) {
+list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *possibleWords, list_t *allWords, int8_t hardMode) {
     self.progressPossible = 0;
-    list_t *canvasPossible = list_init();
+    list_t *canvasPossible = list_init(); // list of all possible words given this canvas
+    list_t *canvasAll;
+    if (hardMode) {
+        canvasAll = list_init();
+    } else {
+        canvasAll = allWords;
+    }
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
     uint32_t lookup[26];
@@ -248,12 +255,7 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
             }
         }
     }
-    // for (int32_t i = 0; i < 26; i++) {
-    //     printf("%d ", count[i]);
-    // }
-    // printf("\n");
-    // printf("%X %X %X %X %X\n", whitelist[0], whitelist[1], whitelist[2], whitelist[3], whitelist[4]);
-    /* gather all possible words */
+    /* gather all possible words given canvas into canvasPossible */
     for (int32_t i = 0; i < possibleWords -> length; i++) {
         self.progressPossible += 1.0 / possibleWords -> length;
         char *word = possibleWords -> data[i].s;
@@ -285,7 +287,42 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     }
     if (canvasPossible -> length == 0) {
         printf("bestWord: Failed due to no possible words\n");
+        if (hardMode) {
+            list_free(canvasAll);
+        }
         return canvasPossible;
+    }
+    if (hardMode) {
+        /* gather all words that could be played given canvas - see https://www.reddit.com/r/wordle/comments/1bhv6c3/whats_your_understanding_of_wordles_hard_mode/ */
+        for (int32_t i = 0; i < allWords -> length; i++) {
+            self.progressPossible += 1.0 / allWords -> length;
+            char *word = allWords -> data[i].s;
+            char good = 1;
+            int8_t currentCount[26] = {0};
+            /* check whitelist */
+            for (int32_t j = 0; j < 5; j++) {
+                currentCount[word[j] - 'A']++;
+                if ((whitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+                    good = 0;
+                    break;
+                }
+            }
+            for (int32_t i = 0; i < 26; i++) {
+                /* check if minimum global count is met */
+                if (abs(count[i]) > currentCount[i]) {
+                    good = 0;
+                    break;
+                }
+                /* check if exact global count is met (if information is available) */
+                if (count[i] < 0 && currentCount[i] != -count[i]) {
+                    good = 0;
+                    break;
+                }
+            }
+            if (good) {
+                list_append(canvasAll, allWords -> data[i], 's');
+            }
+        }
     }
     /* simulate every possible next word, with every permutation */
     list_t *variance = list_init();
@@ -296,14 +333,17 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     }
     if (cursorIndex >= 30 || cursorIndex % 5 != 0) {
         printf("bestWord: Failed due to improper cursorIndex\n");
+        if (hardMode) {
+            list_free(canvasAll);
+        }
         return canvasPossible;
     }
     self.progressBest = 0;
-    for (int32_t i = 0; i < allWords -> length; i++) {
-        self.progressBest += 1.0 / allWords -> length;
+    for (int32_t i = 0; i < canvasAll -> length; i++) {
+        self.progressBest += 1.0 / canvasAll -> length;
         memcpy(proposedCanvas, canvas, 60);
         for (int32_t j = 0; j < 5; j++) {
-            proposedCanvas[cursorIndex * 2 + j * 2] = allWords -> data[i].s[j];
+            proposedCanvas[cursorIndex * 2 + j * 2] = canvasAll -> data[i].s[j];
             proposedCanvas[cursorIndex * 2 + j * 2 + 1] = SWORDLE_COLOR_GREEN;
         }
         double mean = 0;
@@ -332,8 +372,6 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
                 }
             }
         }
-        // printf("%s ", allWords -> data[i].s);
-        // printf("total: %lf ", mean);
         mean /= 243.0;
         /* take variance */
         double v = 0;
@@ -344,9 +382,9 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
         // printf("variance: %lf\n", v);
         list_append(variance, (unitype) v, 'd');
     }
-    for (int32_t i = 0; i < allWords -> length; i++) {
+    for (int32_t i = 0; i < canvasAll -> length; i++) {
         double epsilon = 0.001; // arbitrary advantage towards words that could actually be the word - meant only to break ties between these words and other words that separate all remaining possible words into distinct cases (i would prefer one of those cases to be all green if possible)
-        if (list_find(canvasPossible, allWords -> data[i], 's') != -1) {
+        if (list_find(canvasPossible, canvasAll -> data[i], 's') != -1) {
             variance -> data[i].d -= epsilon;
         }
     }
@@ -356,12 +394,14 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
         gatherTop = order -> length;
     }
     for (int32_t i = 0; i < gatherTop; i++) {
-        list_append(bestWords, allWords -> data[order -> data[order -> length - i - 1].i], 's');
+        list_append(bestWords, canvasAll -> data[order -> data[order -> length - i - 1].i], 's');
         list_append(bestWords, variance -> data[order -> data[order -> length - i - 1].i], 'd');
     }
-    // printf("%s variance: %lf\n", allWords -> data[order -> data[order -> length - 1].i].s, variance -> data[order -> data[order -> length - 1].i].d);
-    memcpy(returnWord, allWords -> data[order -> data[order -> length - 1].i].s, 6);
+    memcpy(returnWord, canvasAll -> data[order -> data[order -> length - 1].i].s, 6);
     list_free(order);
+    if (hardMode) {
+        list_free(canvasAll);
+    }
     return canvasPossible;
 }
 
@@ -373,7 +413,7 @@ void *solverThread(void *arg) {
             list_t *best = list_init();
             self.progressBest = 0;
             self.progressPossible = 0;
-            list_t *canvasPossible = bestWord(word, best, self.canvas, self.possibleWords, self.allWords);
+            list_t *canvasPossible = bestWord(word, best, self.canvas, self.possibleWords, self.allWords, self.hardModeSwitch -> value);
             list_copy(self.best, best);
             // list_print(self.best);
             list_copy(self.canvasPossible, canvasPossible);
@@ -443,13 +483,31 @@ void init() {
                     word[i] -= 32;
                 }
             }
-            word[5] = 0;
-            list_append(self.possibleWords, (unitype) word, 's');
+            word[5] = '\0';
+            if (list_count(self.possibleWords, (unitype) word, 's') == 0) {
+                list_append(self.possibleWords, (unitype) word, 's');
+            }
         }
         fclose(possiblefp);
     }
+    FILE *pastfp = fopen("wordle-past-words-06.02.26", "r");
+    if (pastfp != NULL) {
+        char word[10];
+        while (fgets(word, 10, pastfp) != NULL) {
+            for (int32_t i = 0; i < 5; i++) {
+                if (word[i] >= 97 && word[i] <= 122) {
+                    word[i] -= 32;
+                }
+            }
+            word[5] = '\0';
+            if (list_count(self.possibleWords, (unitype) word, 's') == 0) {
+                list_append(self.possibleWords, (unitype) word, 's');
+            }
+        }
+        fclose(pastfp);
+    }
     self.allWords = list_init();
-    FILE *allfp = fopen("valid-wordle-words.txt", "r");
+    FILE *allfp = fopen("wordle-valid-words.txt", "r");
     if (allfp != NULL) {
         char word[10];
         while (fgets(word, 10, allfp) != NULL) {
@@ -458,8 +516,10 @@ void init() {
                     word[i] -= 32;
                 }
             }
-            word[5] = 0;
-            list_append(self.allWords, (unitype) word, 's');
+            word[5] = '\0';
+            if (list_count(self.allWords, (unitype) word, 's') == 0) {
+                list_append(self.allWords, (unitype) word, 's');
+            }
         }
         fclose(allfp);
     }
@@ -1064,7 +1124,7 @@ int main(int argc, char *argv[]) {
 
 
 void fillBest() {
-    /* fill best with initial best (precalculated) */
+    /* fill best with initial best (precalculated - slightly out of date) */
     list_append(self.best, (unitype) "ROATE", 's');
     list_append(self.best, (unitype) 484.891260, 'd');
     list_append(self.best, (unitype) "TIARE", 's');
