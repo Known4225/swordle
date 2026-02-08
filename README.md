@@ -17,6 +17,9 @@ on linux
 Use the keyboard to enter words, click on letters to cycle through colors, press enter to calculate possible words and calculate a best next word
 
 # TODO
+- Adjust epsilon so it makes HANCE and LANCE equal variance in this case:
+ROATE (BBYBG)
+MAULS (BGBYB)
 - Make hard mode search two layers deep
 - Optimize simulation to not have to redo work on non-changing top words
 - Optimize the program so it runs faster
