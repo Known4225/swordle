@@ -18,6 +18,7 @@ Use the keyboard to enter words, click on letters to cycle through colors, press
 
 # TODO
 - Make hard mode search two layers deep
+- Optimize simulation to not have to redo work on non-changing top words
 - Optimize the program so it runs faster
 - Collect gambits
 - Save and load files?
