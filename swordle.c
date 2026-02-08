@@ -104,55 +104,58 @@ void swordleUnicodeCallback(uint32_t codepoint) {
 }
 
 /* returns number of possible words given a canvas */
-int32_t simulate(uint32_t *whitelistCopy, int8_t *currentCountCopy, uint32_t *lookup, int32_t layer, char *canvas, list_t *possibleWords) {
-    /* copy args to avoid overwriting */
-    uint32_t whitelist[5];
-    memcpy(whitelist, whitelistCopy, 5 * sizeof(uint32_t));
-    int8_t currentCount[26];
-    memcpy(currentCount, currentCountCopy, 26 * sizeof(int8_t));
+int32_t simulate(char *canvas, list_t *possibleWords) {
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
-    for (int32_t i = 0; i < 5; i++) {
-        if (canvas[layer * 10 + i * 2] == 0) {
-            continue;
-        }
-        switch (canvas[layer * 10 + i * 2 + 1]) {
-            case SWORDLE_COLOR_GREEN:
-                if (currentCount[canvas[layer * 10 + i * 2] - 'A'] < 0) {
-                    currentCount[canvas[layer * 10 + i * 2] - 'A']--;
-                } else {
-                    currentCount[canvas[layer * 10 + i * 2] - 'A']++;
-                }
-                whitelist[i] = lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
-            break;
-            case SWORDLE_COLOR_YELLOW:
-                for (int32_t k = 0; k < i; k++) {
-                    if (canvas[layer * 10 + k * 2] == canvas[layer * 10 + i * 2] && canvas[layer * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
-                        return 0;
-                    }
-                }
-                currentCount[canvas[layer * 10 + i * 2] - 'A']++;
-                whitelist[i] &= ~lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
-            break;
-            case SWORDLE_COLOR_GREY:
-                uint32_t blacklist = ~lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
-                int32_t startingIndex = i;
-                if (currentCount[canvas[layer * 10 + i * 2] - 'A'] == 0) {
-                    for (int32_t k = 0; k < 5; k++) {
-                        whitelist[k] &= blacklist;
-                    }
-                } else {
-                    currentCount[canvas[layer * 10 + i * 2] - 'A'] *= -1;
-                    whitelist[i] &= ~lookup[canvas[layer * 10 + i * 2] - 'A'];
-                }
-            break;
-            default:
-            break;
-        }
-    }
+    uint32_t lookup[26];
     for (int32_t i = 0; i < 26; i++) {
-        if (count[i] >= 0 && abs(currentCount[i]) > count[i]) {
-            count[i] = currentCount[i];
+        lookup[i] = pow(2, i);
+    }
+    uint32_t whitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF}; // so i just learned today that you can only do one of these when it is 0
+    for (int32_t j = 0; j < 6; j++) {
+        int8_t currentCount[26] = {0};
+        for (int32_t i = 0; i < 5; i++) {
+            if (canvas[j * 10 + i * 2] == 0) {
+                continue;
+            }
+            switch (canvas[j * 10 + i * 2 + 1]) {
+                case SWORDLE_COLOR_GREEN:
+                    if (currentCount[canvas[j * 10 + i * 2] - 'A'] < 0) {
+                        currentCount[canvas[j * 10 + i * 2] - 'A']--;
+                    } else {
+                        currentCount[canvas[j * 10 + i * 2] - 'A']++;
+                    }
+                    whitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                break;
+                case SWORDLE_COLOR_YELLOW:
+                    for (int32_t k = 0; k < i; k++) {
+                        if (canvas[j * 10 + k * 2] == canvas[j * 10 + i * 2] && canvas[j * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
+                            return 0;
+                        }
+                    }
+                    currentCount[canvas[j * 10 + i * 2] - 'A']++;
+                    whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                break;
+                case SWORDLE_COLOR_GREY:
+                    uint32_t blacklist = ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    int32_t startingIndex = i;
+                    if (currentCount[canvas[j * 10 + i * 2] - 'A'] == 0) {
+                        for (int32_t k = 0; k < 5; k++) {
+                            whitelist[k] &= blacklist;
+                        }
+                    } else {
+                        currentCount[canvas[j * 10 + i * 2] - 'A'] *= -1;
+                        whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A'];
+                    }
+                break;
+                default:
+                break;
+            }
+        }
+        for (int32_t i = 0; i < 26; i++) {
+            if (count[i] >= 0 && abs(currentCount[i]) > count[i]) {
+                count[i] = currentCount[i];
+            }
         }
     }
     /* gather number of possible words given canvas into canvasPossible */
@@ -193,8 +196,10 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     self.progressPossible = 0;
     list_t *canvasPossible = list_init(); // list of all possible words given this canvas
     list_t *canvasAll;
+    int32_t layers = 1; // how many layers deep to search
     if (hardMode) {
         canvasAll = list_init();
+        layers = 2;
     } else {
         canvasAll = allWords;
     }
@@ -206,42 +211,42 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
     }
     uint32_t whitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF}; // so i just learned today that you can only do one of these when it is 0
     uint32_t hardmodeWhitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF};
-    for (int32_t layer = 0; layer < 6; layer++) {
+    for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
         for (int32_t i = 0; i < 5; i++) {
-            if (canvas[layer * 10 + i * 2] == 0) {
+            if (canvas[j * 10 + i * 2] == 0) {
                 continue;
             }
-            switch (canvas[layer * 10 + i * 2 + 1]) {
+            switch (canvas[j * 10 + i * 2 + 1]) {
                 case SWORDLE_COLOR_GREEN:
-                    if (currentCount[canvas[layer * 10 + i * 2] - 'A'] < 0) {
-                        currentCount[canvas[layer * 10 + i * 2] - 'A']--;
+                    if (currentCount[canvas[j * 10 + i * 2] - 'A'] < 0) {
+                        currentCount[canvas[j * 10 + i * 2] - 'A']--;
                     } else {
-                        currentCount[canvas[layer * 10 + i * 2] - 'A']++;
+                        currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
-                    whitelist[i] = lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
-                    hardmodeWhitelist[i] = lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    whitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    hardmodeWhitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:
                     for (int32_t k = 0; k < i; k++) {
-                        if (canvas[layer * 10 + k * 2] == canvas[layer * 10 + i * 2] && canvas[layer * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
+                        if (canvas[j * 10 + k * 2] == canvas[j * 10 + i * 2] && canvas[j * 10 + k * 2 + 1] == SWORDLE_COLOR_GREY) {
                             printf("bestWord: Invalid canvas configuration\n");
                             return canvasPossible;
                         }
                     }
-                    currentCount[canvas[layer * 10 + i * 2] - 'A']++;
-                    whitelist[i] &= ~lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    currentCount[canvas[j * 10 + i * 2] - 'A']++;
+                    whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_GREY:
-                    uint32_t blacklist = ~lookup[canvas[layer * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    uint32_t blacklist = ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                     int32_t startingIndex = i;
-                    if (currentCount[canvas[layer * 10 + i * 2] - 'A'] == 0) {
+                    if (currentCount[canvas[j * 10 + i * 2] - 'A'] == 0) {
                         for (int32_t k = 0; k < 5; k++) {
                             whitelist[k] &= blacklist;
                         }
                     } else {
-                        currentCount[canvas[layer * 10 + i * 2] - 'A'] *= -1;
-                        whitelist[i] &= ~lookup[canvas[layer * 10 + i * 2] - 'A'];
+                        currentCount[canvas[j * 10 + i * 2] - 'A'] *= -1;
+                        whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A'];
                     }
                 break;
                 default:
@@ -347,7 +352,7 @@ list_t *bestWord(char *returnWord, list_t *bestWords, char *canvas, list_t *poss
         double mean = 0;
         int32_t values[243];
         for (int32_t j = 0; j < 243; j++) {
-            values[j] = simulate(whitelist, count, lookup, cursorIndex / 5, proposedCanvas, canvasPossible);
+            values[j] = simulate(proposedCanvas, canvasPossible);
             mean += values[j];
             proposedCanvas[cursorIndex * 2 + 1]++;
             if (proposedCanvas[cursorIndex * 2 + 1] == SWORDLE_COLOR_BORDER_HIGHLIGHT) {
