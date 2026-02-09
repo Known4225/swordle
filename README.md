@@ -20,8 +20,7 @@ Use the keyboard to enter words, click on letters to cycle through colors, press
 - Adjust epsilon so it makes HANCE and LANCE equal variance in this case:
 ROATE (BBYBG)
 MAULS (BGBYB)
-- Make hard mode search two layers deep
-- Optimize simulation to not have to redo work on non-changing top words
+- Make two layer deep heuristic more scientific (multiplying variances together not a good method)
 - Optimize the program so it runs faster
 - Collect gambits
 - Save and load files?

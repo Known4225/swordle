@@ -24,6 +24,14 @@ enum {
     S_KEY_BACKSPACE = 3,
 };
 
+/* self.solving */
+enum {
+    SOLVE_NOT_SOLVING = 0,
+    SOLVE_QUEUE_SOLVE = 1,
+    SOLVE_GET_POSSIBLE_WORDS = 2,
+    SOLVE_GET_BEST_WORDS = 3,
+};
+
 /* self.colors index */
 typedef enum {
     SWORDLE_COLOR_TEXT = 0,
@@ -53,6 +61,8 @@ typedef struct {
     list_t *canvasGuesses; // all possible guesses in hard mode given canvas
     list_t *best; // word, variance, word, variance, ...
     tt_switch_t *hardModeSwitch; // hard mode switch
+    tt_switch_t *twoLayerSwitch; // search two layers
+    tt_switch_t *killerMoveSwitch; // instead of using variance heuristic, use mode of remaining words = 1
     /* sidebars */
     double bestX;
     int32_t bestIndex;
@@ -140,7 +150,7 @@ void init() {
         }
         fclose(possiblefp);
     }
-    FILE *pastfp = fopen("wordle-past-words-06.02.26", "r");
+    FILE *pastfp = fopen("wordle-past-words-06.02.26.txt", "r");
     if (pastfp != NULL) {
         char word[10];
         while (fgets(word, 10, pastfp) != NULL) {
@@ -187,12 +197,16 @@ void init() {
     self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
     self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
+    self.twoLayerSwitch = tt_switchInit("Two Layer Search", NULL, self.possibleX - 84, 150, 6);
+    self.twoLayerSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
+    self.killerMoveSwitch = tt_switchInit("Killer Move Heuristic", NULL, self.possibleX - 84, 140, 6);
+    self.killerMoveSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
 
     /* solver thread */
     self.progressBest = 0;
-    self.progressPossible = 0;
+    self.progressPossible = 1.0; // unused now
     self.solverThreadExists = 1;
-    self.solving = 0;
+    self.solving = SOLVE_NOT_SOLVING;
     pthread_t solverThreadVar;
     pthread_create(&solverThreadVar, NULL, solverThread, NULL);
     /* signal handler */
@@ -404,12 +418,15 @@ int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet
 }
 
 /* */
-double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t hardMode, int32_t layers, int32_t originalLayers) {
-    self.progressBest = 0;
+double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int8_t hardMode, int8_t layers, int8_t originalLayers, int8_t killerMoveHeuristic) {
+    if (output == NULL && (possibleWords -> length == 0 || allWords -> length == 0)) {
+        return 1.0;
+    }
     list_t *variance = list_init();
     for (int32_t i = 0; i < allWords -> length; i++) {
         if (layers == originalLayers) {
             self.progressBest += 1.0 / allWords -> length;
+            // printf("%lf %d\n", self.progressBest, allWords -> length);
         }
         char proposedCanvas[12] = {0};
         for (int32_t j = 0; j < 5; j++) {
@@ -417,7 +434,7 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t
             proposedCanvas[j * 2 + 1] = SWORDLE_COLOR_GREEN;
         }
         double mean = 0;
-        double meanInner = 0;
+        double meanVarianceInner = 0.0;
         int32_t values[243];
         list_t *proposedPossibleWords = NULL;
         for (int32_t j = 0; j < 243; j++) {
@@ -429,14 +446,20 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t
                 if (hardMode) {
                     list_t *proposedAllWords = list_init();
                     getHardModePossibleGuesses(proposedAllWords, proposedCanvas, allWords);
-                    meanInner += bestWord(NULL, proposedPossibleWords, proposedAllWords, hardMode, layers - 1, originalLayers);
+                    meanVarianceInner += bestWord(NULL, proposedPossibleWords, proposedAllWords, hardMode, layers - 1, originalLayers, killerMoveHeuristic);
                     list_free(proposedAllWords);
                     list_free(proposedPossibleWords);
                 } else {
-                    meanInner += bestWord(NULL, proposedPossibleWords, allWords, hardMode, layers - 1, originalLayers);
+                    meanVarianceInner += bestWord(NULL, proposedPossibleWords, allWords, hardMode, layers - 1, originalLayers, killerMoveHeuristic);
                 }
             }
-            mean += values[j];
+            if (killerMoveHeuristic) {
+                if (values[j] != 1) {
+                    mean += 1;
+                }
+            } else {
+                mean += values[j];
+            }
             proposedCanvas[1]++;
             if (proposedCanvas[1] == SWORDLE_COLOR_BORDER_HIGHLIGHT) {
                 proposedCanvas[1] = SWORDLE_COLOR_GREEN;
@@ -459,17 +482,21 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t
             }
         }
         mean /= 243.0;
-        meanInner /= 243.0;
-        /* take variance */
-        double v = 0;
-        for (int32_t j = 0; j < 243; j++) {
-            v += (values[j] - mean) * (values[j] - mean);
+        meanVarianceInner /= 243.0;
+        if (!killerMoveHeuristic) {
+            /* take variance */
+            double v = 0;
+            for (int32_t j = 0; j < 243; j++) {
+                v += (values[j] - mean) * (values[j] - mean);
+            }
+            v /= 243.0;
+            if (layers == 0) {
+                meanVarianceInner = 1;
+            }
+            list_append(variance, (unitype) (v * meanVarianceInner), 'd');
+        } else {
+            list_append(variance, (unitype) mean, 'd');
         }
-        v /= 243.0;
-        if (layers == 0) {
-            meanInner = 1;
-        }
-        list_append(variance, (unitype) (v * meanInner), 'd');
     }
     for (int32_t i = 0; i < allWords -> length; i++) {
         double epsilon = 0.001; // arbitrary advantage towards words that could actually be the word - meant only to break ties between these words and other words that separate all remaining possible words into distinct cases (i would prefer one of those cases to be all green if possible)
@@ -479,8 +506,10 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t
     }
     if (output == NULL) {
         double minVariance = 10000000000.0;
+        int32_t mindex = -1;
         for (int32_t i = 0; i < allWords -> length; i++) {
             if (variance -> data[i].d < minVariance) {
+                mindex = i;
                 minVariance = variance -> data[i].d;
             }
         }
@@ -495,18 +524,19 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int32_t
         if (output -> length > 1) {
             return output -> data[1].d;
         }
-        return 0;
+        return 10000000000.0;
     }
 }
 
 void *solverThread(void *arg) {
     while (self.solverThreadExists) {
-        if (self.solving == 1) {
-            self.solving = 2;
+        if (self.solving == SOLVE_QUEUE_SOLVE) {
+            self.solving = SOLVE_GET_POSSIBLE_WORDS;
             self.progressBest = 0;
-            self.progressPossible = 0;
+            self.progressPossible = 1.0; // unused now
             list_clear(self.canvasPossible);
             getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
+            self.solving = SOLVE_GET_BEST_WORDS;
             if (self.canvasPossible -> length == 0) {
                 printf("No Possible Words\n");
                 list_clear(self.best);
@@ -515,13 +545,13 @@ void *solverThread(void *arg) {
                     list_clear(self.canvasGuesses);
                     getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
                     list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, 1);
+                    bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
                 } else {
                     list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, 0);
+                    bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
                 }
             }
-            self.solving = 0;
+            self.solving = SOLVE_NOT_SOLVING;
         }
     }
 }
@@ -696,7 +726,7 @@ void renderResults() {
     double ypos = 150;
     swordle_setColor(SWORDLE_COLOR_SIDEBAR);
     turtleRectangle(-320, -180, xpos + 70, 180);
-    if (self.solving) {
+    if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS || self.solving == SOLVE_GET_BEST_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
         int32_t splitter = self.tick % 400;
@@ -757,7 +787,7 @@ void renderResults() {
     ypos = 150;
     swordle_setColor(SWORDLE_COLOR_SIDEBAR);
     turtleRectangle(320, -180, xpos - 70, 180);
-    if (self.solving) {
+    if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
         int32_t splitter = self.tick % 400;
@@ -837,14 +867,18 @@ void mouseTick() {
                     self.cursorIndex++;
                 } else if (self.keyboard[self.keyIndex] == '1') {
                     /* enter */
-                    if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
-                        self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
-                        self.possibleScrollbar -> value = 0;
-                        self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
-                        self.bestScrollbar -> value = 0;
-                        self.solving = 1;
+                    if (self.solving == SOLVE_NOT_SOLVING) {
+                        if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
+                            self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+                            self.possibleScrollbar -> value = 0;
+                            self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+                            self.bestScrollbar -> value = 0;
+                            self.solving = SOLVE_QUEUE_SOLVE;
+                        } else {
+                            printf("Enter Error: cursorIndex error\n");
+                        }
                     } else {
-                        printf("cursorIndex error\n");
+                        printf("Enter Error: Already Solving\n");
                     }
                 } else if (self.keyboard[self.keyIndex] == '2') {
                     /* backspace */
@@ -862,14 +896,18 @@ void mouseTick() {
     if (turtleKeyPressed(GLFW_KEY_ENTER)) {
         if (self.keys[S_KEY_ENTER] == 0) {
             self.keys[S_KEY_ENTER] = 1;
-            if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
-                self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
-                self.possibleScrollbar -> value = 0;
-                self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
-                self.bestScrollbar -> value = 0;
-                self.solving = 1;
+            if (self.solving == SOLVE_NOT_SOLVING) {
+                if (self.cursorIndex % 5 == 0 && self.cursorIndex < 30) {
+                    self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
+                    self.possibleScrollbar -> value = 0;
+                    self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
+                    self.bestScrollbar -> value = 0;
+                    self.solving = SOLVE_QUEUE_SOLVE;
+                } else {
+                    printf("Enter Error: cursorIndex error\n");
+                }
             } else {
-                printf("cursorIndex error\n");
+                printf("Enter Error: Already Solving\n");
             }
         }
     } else {
