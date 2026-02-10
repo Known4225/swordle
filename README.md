@@ -21,8 +21,7 @@ Use the keyboard to enter words, click on letters to cycle through colors, press
 ROATE (BBYBG)
 MAULS (BGBYB)
 - Make two layer deep heuristic more scientific (multiplying variances together not a good method)
-- Optimize the program so it runs faster
-- Collect gambits
+- Optimize the program so it runs faster - Create a separate thread per word checked in bestWord?
 - Save and load files?
 
 # Images
