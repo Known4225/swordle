@@ -4,6 +4,12 @@ Wordle solver
 
 Run `swordle.exe`
 
+Type words with your keyboard or the on screen keyboard
+
+Click on letters to turn them yellow or green
+
+Press enter to solve for possible words and next best guess
+
 You can also build the binary yourself with
 ```
 gcc swordle.c -L./Windows -lturtle -lglfw3 -lopengl32 -lgdi32 -lglad -lole32 -luuid -DOS_WINDOWS -O3 -o swordle.exe
