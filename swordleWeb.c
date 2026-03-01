@@ -8,12 +8,10 @@ Past answers source: https://www.fiveforks.com/wordle/#a
 
 #include "turtle.h"
 #include <time.h>
-#include <pthread.h>
 
 /* forward declarations */
 void fillBest();
 void swordleUnicodeCallback(uint32_t codepoint);
-void *solverThread(void *arg);
 
 /* self.keys */
 enum {
@@ -206,8 +204,6 @@ void init() {
     self.progressPossible = 1.0; // unused now
     self.solverThreadExists = 1;
     self.solving = SOLVE_NOT_SOLVING;
-    pthread_t solverThreadVar;
-    pthread_create(&solverThreadVar, NULL, solverThread, NULL);
     /* signal handler */
     fillBest();
 }
@@ -526,33 +522,31 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int8_t 
     }
 }
 
-void *solverThread(void *arg) {
-    while (self.solverThreadExists) {
-        if (self.solving == SOLVE_QUEUE_SOLVE) {
-            self.solving = SOLVE_GET_POSSIBLE_WORDS;
-            self.progressBest = 0;
-            self.progressPossible = 1.0; // unused now
-            list_clear(self.canvasPossible);
-            getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
-            self.solving = SOLVE_GET_BEST_WORDS;
-            if (self.canvasPossible -> length == 0) {
-                printf("No Possible Words\n");
+void solve() {
+    if (self.solving == SOLVE_QUEUE_SOLVE) {
+        self.solving = SOLVE_GET_POSSIBLE_WORDS;
+        self.progressBest = 0;
+        self.progressPossible = 1.0; // unused now
+        list_clear(self.canvasPossible);
+        getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
+        self.solving = SOLVE_GET_BEST_WORDS;
+    } else if (self.solving == SOLVE_GET_BEST_WORDS) {
+        if (self.canvasPossible -> length == 0) {
+            printf("No Possible Words\n");
+            list_clear(self.best);
+        } else {
+            if (self.hardModeSwitch -> value) {
+                list_clear(self.canvasGuesses);
+                getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
                 list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
             } else {
-                if (self.hardModeSwitch -> value) {
-                    list_clear(self.canvasGuesses);
-                    getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
-                    list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
-                } else {
-                    list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
-                }
+                list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
             }
-            self.solving = SOLVE_NOT_SOLVING;
         }
+        self.solving = SOLVE_NOT_SOLVING;
     }
-    return NULL;
 }
 
 void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double radius) {
@@ -721,20 +715,7 @@ void renderResults() {
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS || self.solving == SOLVE_GET_BEST_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
-        int32_t splitter = self.tick % 400;
-        if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
-        } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
-        } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
-        } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
-        }
-        swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
-        swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressBest, -1);
+        turtleTextWriteString("Searching", xpos, 0, 10, 50);
     } else {
         if (self.best -> length == 0) {
             swordle_setColor(SWORDLE_COLOR_TEXT);
@@ -782,20 +763,7 @@ void renderResults() {
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
-        int32_t splitter = self.tick % 400;
-        if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
-        } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
-        } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
-        } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
-        }
-        swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
-        swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressPossible, -1);
+        turtleTextWriteString("Searching", xpos, 0, 10, 50);
     } else {
         list_t *selectList;
         if (self.canvasPossible -> length == 0) {
@@ -1081,10 +1049,11 @@ int main(int argc, char *argv[]) {
         turtleClear();
         renderCanvas();
         renderResults();
-        mouseTick();
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
         turtleUpdate(); // update the screen
+        solve();
+        mouseTick();
         end = clock();
         while ((double) (end - start) / CLOCKS_PER_SEC < (1.0 / tps)) {
             end = clock();

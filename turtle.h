@@ -19,9 +19,10 @@ https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 /*
-21.04.23:
+Created by Ryan Srichai 21.04.23:
 unitype list, supports a variety of types
 
 example usage:
@@ -49,7 +50,7 @@ list_free(newList);
 Notes:
 Strings added to the list will be "strdup"d - meaning that you can pass in stack allocated buffers and string literals. This does not apply to pointers added to the list which must be heap allocated
 When calling list_clear() or list_free(), the list will free all strings, pointers, and lists within itself. If you don't want this to happen append the item to the list as a uint64
-list_copy will make a copy of all strings, pointers, and lists - it will not use the same pointers (a list can be safely freed after being copied without causing effects to the copied list)
+list_copy will make a copy of all strings, pointers, and lists - it will not use the same pointers (a list can be safely freed after being copied without causing effects to the copied list). The data in pointers is not copied as the list does not know how big the data is
 You must call list_init() when intending to copy a list - all lists must be initialised before any functions can be called on them (if your program is crashing - check to make sure you initialised all your lists)
 */
 
@@ -96,21 +97,31 @@ typedef union {
 } unitype;
 
 struct list_f {
-    uint32_t length;
-    uint32_t realLength;
+    _Atomic volatile int8_t lock;
+    int32_t ID;
+    int32_t length;
+    int32_t realLength;
     int8_t *type;
     unitype *data;
 };
 
 typedef struct {
-    uint32_t length;
-    uint32_t dummy;
+    _Atomic volatile int8_t lock;
+    int32_t ID;
+    int32_t length;
+    int32_t dummy;
     int8_t *type;
     unitype *data;
 } sublist_t;
 
 /* create a list */
 list_t *list_init();
+
+/* acquire lock on list (only do this in multithreaded applications) */
+void list_acquire(list_t *list);
+
+/* release lock on list (only do this in multithreaded applications) */
+void list_release(list_t *list);
 
 /* append to list, must specify type */
 void list_append(list_t *list, unitype data, char type);
@@ -128,7 +139,7 @@ unitype list_pop(list_t *list);
 unitype list_delete(list_t *list, int32_t index);
 
 /* deletes many items from the list spanning from [indexMin] to [indexMax - 1] */
-void list_delete_range(list_t *list, uint32_t indexMin, uint32_t indexMax);
+void list_delete_range(list_t *list, int32_t indexMin, int32_t indexMax);
 
 /* checks if two unitype items are equal */
 int32_t unitype_check_equal(unitype item1, unitype item2, int8_t typeItem1, int8_t typeItem2);
@@ -140,7 +151,7 @@ int32_t list_find(list_t *list, unitype item, char type);
 int32_t list_index(list_t *list, unitype item, char type);
 
 /* counts how many instances of an item is found in the list */
-uint32_t list_count(list_t *list, unitype item, char type);
+int32_t list_count(list_t *list, unitype item, char type);
 
 /* sort list (biggest to smallest) */
 void list_sort(list_t *list);
@@ -169,14 +180,26 @@ void unitype_fprint(FILE *fp, unitype item, char type);
 /* copies one list to another (duplicates strings or pointers) */
 void list_copy(list_t *dest, list_t *src);
 
-/* prints the list without brackets */
+/* prints the list to a file without brackets */
 void list_fprint_emb(FILE *fp, list_t *list);
+
+/* prints the list to a file */
+void list_fprint(FILE *fp, list_t *list);
 
 /* prints the list */
 void list_print(list_t *list);
 
 /* prints the types of the list */
 void list_print_type(list_t *list);
+
+/* writes list to a file in a special format: [data, type, data, type, ...]. Can be retrieved with list_read() */
+void list_write(FILE *fp, list_t *list);
+
+/* a list_append that takes a string and parses it to the appropriate type */
+void list_append_element(list_t *list, char *element, char type);
+
+/* reads list from a file that was written to with list_write() - ensure file pointer is located at the start of the list */
+list_t *list_read(FILE *fp);
 
 /* frees the list's data but not the list itself */
 void list_free_lite(list_t *list);
@@ -185,7 +208,7 @@ void list_free_lite(list_t *list);
 void list_free(list_t *list);
 
 /* creates a sublist (from bottom to top - 1) out of an existing list, do not modify a parent list while a sublist exist */
-sublist_t *sublist_init(list_t *list, uint32_t bottom, uint32_t top);
+sublist_t *sublist_init(list_t *list, int32_t bottom, int32_t top);
 
 /* delete a sublist */
 void sublist_free(sublist_t *sublist);
@@ -218,8 +241,8 @@ bufferList - like a normal list but only supports floats
 */
 
 typedef struct {
-    uint32_t length;
-    uint32_t realLength;
+    int32_t length;
+    int32_t realLength;
     float *data;
 } bufferList_t;
 
@@ -239,7 +262,7 @@ float bufferList_pop(bufferList_t *list);
 float bufferList_delete(bufferList_t *list, int32_t index);
 
 /* deletes many items from the list spanning from [indexMin] to [indexMax - 1] */
-void bufferList_delete_range(bufferList_t* list, uint32_t indexMin, uint32_t indexMax);
+void bufferList_delete_range(bufferList_t* list, int32_t indexMin, int32_t indexMax);
 
 /* returns the index of the first instance of the item in the list, returns -1 if not found (python) */
 int32_t bufferList_find(bufferList_t *list, float item);
@@ -248,7 +271,7 @@ int32_t bufferList_find(bufferList_t *list, float item);
 int32_t bufferList_index(bufferList_t *list, float item);
 
 /* counts how many instances of an item is found in the list */
-uint32_t bufferList_count(bufferList_t *list, float item);
+int32_t bufferList_count(bufferList_t *list, float item);
 
 /* deletes the first instance of the item from the list, returns the index the item was at, returns -1 and doesn't modify the list if not found (python but without ValueError) */
 int32_t bufferList_remove(bufferList_t *list, float item);
@@ -17855,7 +17878,7 @@ tot3+=decode[3+(ofs)]*hc[3+(ofs)];
 tot0+=decode[0+(ofs)]*hc[0+(ofs)];
 #define stbir__2_coeff_remnant(ofs)        \
 tot0+=decode[0+(ofs)]*hc[0+(ofs)];   \
-tot1+=decode[1+(ofs)]*hc[1+(ofs)];   \
+tot1+=decode[1+(ofs)]*hc[1+(ofs)];
 #define stbir__3_coeff_remnant(ofs)        \
 tot0+=decode[0+(ofs)]*hc[0+(ofs)];   \
 tot1+=decode[1+(ofs)]*hc[1+(ofs)];   \
@@ -20390,7 +20413,7 @@ tota2+=decode[2+(ofs)*3]*c;      \
 c=hc[1+(ofs)];                   \
 totb0+=decode[3+(ofs)*3]*c;      \
 totb1+=decode[4+(ofs)*3]*c;      \
-totb2+=decode[5+(ofs)*3]*c;      \
+totb2+=decode[5+(ofs)*3]*c;
 #define stbir__3_coeff_remnant(ofs)  \
 c=hc[0+(ofs)];                   \
 tota0+=decode[0+(ofs)*3]*c;      \
@@ -22942,7 +22965,7 @@ tot2+=decode[9]*c;             \
 tot3+=decode[10]*c;            \
 tot4+=decode[11]*c;            \
 tot5+=decode[12]*c;            \
-tot6+=decode[13]*c;            \
+tot6+=decode[13]*c;
 #define stbir__3_coeff_only()        \
 float tot0,tot1,tot2,tot3,tot4,tot5,tot6,c; \
 c=hc[0];                       \
@@ -22968,7 +22991,7 @@ tot2+=decode[16]*c;            \
 tot3+=decode[17]*c;            \
 tot4+=decode[18]*c;            \
 tot5+=decode[19]*c;            \
-tot6+=decode[20]*c;            \
+tot6+=decode[20]*c;
 #define stbir__store_output_tiny()                \
 output[0]=tot0;                             \
 output[1]=tot1;                             \
@@ -23058,7 +23081,7 @@ x2+=decode[2+(ofs)*7]*c;   \
 x3+=decode[3+(ofs)*7]*c;   \
 x4+=decode[4+(ofs)*7]*c;   \
 x5+=decode[5+(ofs)*7]*c;   \
-x6+=decode[6+(ofs)*7]*c;   \
+x6+=decode[6+(ofs)*7]*c;
 #define stbir__2_coeff_remnant(ofs) \
 STBIR_SIMD_NO_UNROLL(decode);  \
 c=hc[0+(ofs)];               \
@@ -23076,7 +23099,7 @@ y2+=decode[9+(ofs)*7]*c;   \
 y3+=decode[10+(ofs)*7]*c;  \
 y4+=decode[11+(ofs)*7]*c;  \
 y5+=decode[12+(ofs)*7]*c;  \
-y6+=decode[13+(ofs)*7]*c;  \
+y6+=decode[13+(ofs)*7]*c;
 #define stbir__3_coeff_remnant(ofs) \
 STBIR_SIMD_NO_UNROLL(decode);  \
 c=hc[0+(ofs)];               \
@@ -23102,7 +23125,7 @@ x2+=decode[16+(ofs)*7]*c;  \
 x3+=decode[17+(ofs)*7]*c;  \
 x4+=decode[18+(ofs)*7]*c;  \
 x5+=decode[19+(ofs)*7]*c;  \
-x6+=decode[20+(ofs)*7]*c;  \
+x6+=decode[20+(ofs)*7]*c;
 #define stbir__store_output()                     \
 output[0]=x0+y0;                          \
 output[1]=x1+y1;                          \
@@ -46499,6 +46522,12 @@ extern void glVertex2d(double x, double y);
 extern void glEnd();
 typedef struct GLFWwindow GLFWwindow;
 
+/* special function that can be called prior to turtleInit - this function condenses the window creation code boilerplate */
+GLFWwindow *turtleCreateWindow(char *windowName);
+
+/* special function that can be called prior to turtleInit - this function condenses the window creation code with icon boilerplate */
+GLFWwindow *turtleCreateWindowIcon(char *windowName, char *filename);
+
 typedef struct {
     GLFWwindow *window; // the window
     list_t *keyPressed; // global keyPressed and mousePressed list
@@ -46685,13 +46714,13 @@ void turtleSetResizeMode(turtle_resize_mode_t resizeMode);
 /* load a png, jpg, or bmp to GPU memory as a texture */
 turtle_texture_t turtleTextureLoad(char *filename);
 
-/* load data from an array of uint8 - use GL_RGB or GL_RGBA for encoding */
+/* load data from an array - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
 turtle_texture_t turtleTextureLoadArray(uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding);
 
-/* load data from a list - use GL_RGB or GL_RGBA for encoding */
+/* load data from a list - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
 turtle_texture_t turtleTextureLoadList(list_t *list, uint32_t width, uint32_t height, uint32_t encoding);
 
-/* load data from a list or array of uint8 (make one NULL) - use GL_RGB or GL_RGBA for encoding */
+/* load data from a list or array of uint8 (make one NULL) - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
 turtle_texture_t turtleTextureLoadListArrayInternal(list_t *list, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding);
 
 /* get the original width of a loaded texture */
@@ -46702,6 +46731,18 @@ int32_t turtleTextureGetHeight(turtle_texture_t texture);
 
 /* print texture name, width, height, and channels */
 void turtleTexturePrint(turtle_texture_t texture);
+
+/* replace a texture with new data from a png, jpg, or bmp */
+int32_t turtleTextureReplace(turtle_texture_t texture, char *filename);
+
+/* replace a texture with new data from an array - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
+int32_t turtleTextureReplaceArray(turtle_texture_t texture, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding);
+
+/* replace a texture with new data from a list - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
+int32_t turtleTextureReplaceList(turtle_texture_t texture, list_t *list, uint32_t width, uint32_t height, uint32_t encoding);
+
+/* replace a texture with new data from a list or array of uint8 (make one NULL) - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
+int32_t turtleTextureReplaceListArrayInternal(turtle_texture_t texture, list_t *list, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding);
 
 /* remove a texture from GPU memory */
 int32_t turtleTextureUnload(turtle_texture_t texture);
@@ -46936,31 +46977,20 @@ typedef struct {
 extern tt_enabled_t tt_enabled; // all start at 0 (global variable)
 
 typedef enum {
-    TT_ELEMENT_BUTTON = 0,
-    TT_ELEMENT_SWITCH = 1,
-    TT_ELEMENT_DIAL = 2,
-    TT_ELEMENT_SLIDER = 3,
-    TT_ELEMENT_SCROLLBAR = 4,
-    TT_ELEMENT_CONTEXT = 5,
+    TT_ELEMENT_NONE = 0, // lowest priority
+    TT_ELEMENT_BUTTON = 1,
+    TT_ELEMENT_SWITCH = 2,
+    TT_ELEMENT_DIAL = 3,
+    TT_ELEMENT_SLIDER = 4,
+    TT_ELEMENT_TEXTBOX = 5,
     TT_ELEMENT_DROPDOWN = 6,
-    TT_ELEMENT_TEXTBOX = 7,
-    TT_NUMBER_OF_ELEMENTS = 8,
+    TT_ELEMENT_SCROLLBAR = 7,
+    TT_ELEMENT_CONTEXT = 8,
+    TT_ELEMENT_RIBBON = 9,
+    TT_ELEMENT_POPUP = 10,
+    TT_ELEMENT_HIGHEST = 11, // highest priority
+    TT_NUMBER_OF_ELEMENTS = 11,
 } tt_element_names_t;
-
-typedef enum {
-    TT_ELEMENT_PRIORITY_NONE = 0,
-    TT_ELEMENT_PRIORITY_BUTTON = 1,
-    TT_ELEMENT_PRIORITY_SWITCH = 2,
-    TT_ELEMENT_PRIORITY_DIAL = 3,
-    TT_ELEMENT_PRIORITY_SLIDER = 4,
-    TT_ELEMENT_PRIORITY_TEXTBOX = 5,
-    TT_ELEMENT_PRIORITY_DROPDOWN = 6,
-    TT_ELEMENT_PRIORITY_SCROLLBAR = 7,
-    TT_ELEMENT_PRIORITY_CONTEXT = 8,
-    TT_ELEMENT_PRIORITY_RIBBON = 9,
-    TT_ELEMENT_PRIORITY_POPUP = 10,
-    TT_ELEMENT_PRIORITY_HIGHEST = 11,
-} tt_element_priority_t;
 
 typedef struct {
     list_t *all;
@@ -46968,13 +46998,26 @@ typedef struct {
     list_t *switches;
     list_t *dials;
     list_t *sliders;
+    list_t *textboxes;
+    list_t *dropdowns;
     list_t *scrollbars;
     list_t *contexts;
-    list_t *dropdowns;
-    list_t *textboxes;
 } tt_elements_t;
 
 extern tt_elements_t tt_elements;
+
+/* display setting of the element */
+typedef enum {
+    TT_ELEMENT_ENABLED = 0,
+    TT_ELEMENT_NO_MOUSE = 1,
+    TT_ELEMENT_HIDE = 2,
+} tt_element_enabled_t;
+
+/* if an element is ignored then it is not updated with turtleToolsUpdate() and must be updated separately */
+typedef enum {
+    TT_ELEMENT_NOT_IGNORED = 0,
+    TT_ELEMENT_IGNORED = 1,
+} tt_element_ignored_t;
 
 typedef enum {
     TT_COLOR_BACKGROUND = 0,
@@ -47035,14 +47078,6 @@ void turtleToolsSetTheme(tt_theme_name_t theme);
 extern int32_t tt_color_default[];
 
 typedef enum {
-    /* ribbon and popup (special cases) */
-    TT_COLOR_SLOT_RIBBON_TOP = TT_COLOR_COMPONENT_HIGHLIGHT,
-    TT_COLOR_SLOT_RIBBON_DROPDOWN = TT_COLOR_COMPONENT_HIGHLIGHT,
-    TT_COLOR_SLOT_RIBBON_HOVER = TT_COLOR_COMPONENT,
-    TT_COLOR_SLOT_RIBBON_SELECT = TT_COLOR_COMPONENT,
-    TT_COLOR_SLOT_POPUP_BOX = TT_COLOR_COMPONENT_ALTERNATE,
-    TT_COLOR_SLOT_POPUP_BUTTON_SELECT = TT_COLOR_COMPONENT_HIGHLIGHT,
-    TT_COLOR_SLOT_POPUP_BUTTON = TT_COLOR_COMPONENT,
     /* button */
     TT_COLOR_SLOT_BUTTON_TEXT = 0,
     TT_COLOR_SLOT_BUTTON = 1,
@@ -47064,6 +47099,18 @@ typedef enum {
     TT_COLOR_SLOT_SLIDER_TEXT = 0,
     TT_COLOR_SLOT_SLIDER_BAR = 1,
     TT_COLOR_SLOT_SLIDER_CIRCLE = 2,
+    /* textbox */
+    TT_COLOR_SLOT_TEXTBOX_TEXT = 0,
+    TT_COLOR_SLOT_TEXTBOX_BOX = 1,
+    TT_COLOR_SLOT_TEXTBOX_PHANTOM_TEXT = 2,
+    TT_COLOR_SLOT_TEXTBOX_LINE = 3,
+    /* dropdown */
+    TT_COLOR_SLOT_DROPDOWN_TEXT = 0,
+    TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER = 1,
+    TT_COLOR_SLOT_DROPDOWN_BASE = 2,
+    TT_COLOR_SLOT_DROPDOWN_SELECT = 3,
+    TT_COLOR_SLOT_DROPDOWN_HOVER = 4,
+    TT_COLOR_SLOT_DROPDOWN_TRIANGLE = 5,
     /* scrollbar */
     TT_COLOR_SLOT_SCROLLBAR_BASE = 1,
     TT_COLOR_SLOT_SCROLLBAR_BAR = 2,
@@ -47073,28 +47120,33 @@ typedef enum {
     TT_COLOR_SLOT_CONTEXT_TEXT = 0,
     TT_COLOR_SLOT_CONTEXT_BASE = 1,
     TT_COLOR_SLOT_CONTEXT_SELECT = 2,
-    /* dropdown */
-    TT_COLOR_SLOT_DROPDOWN_TEXT = 0,
-    TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER = 1,
-    TT_COLOR_SLOT_DROPDOWN_BASE = 2,
-    TT_COLOR_SLOT_DROPDOWN_SELECT = 3,
-    TT_COLOR_SLOT_DROPDOWN_HOVER = 4,
-    TT_COLOR_SLOT_DROPDOWN_TRIANGLE = 5,
-    /* textbox */
-    TT_COLOR_SLOT_TEXTBOX_TEXT = 0,
-    TT_COLOR_SLOT_TEXTBOX_BOX = 1,
-    TT_COLOR_SLOT_TEXTBOX_PHANTOM_TEXT = 2,
-    TT_COLOR_SLOT_TEXTBOX_LINE = 3,
+    /* ribbon */
+    TT_COLOR_SLOT_RIBBON_TEXT = 0,
+    TT_COLOR_SLOT_RIBBON_TOP = 1,
+    TT_COLOR_SLOT_RIBBON_DROPDOWN = 2,
+    TT_COLOR_SLOT_RIBBON_HOVER = 3,
+    TT_COLOR_SLOT_RIBBON_SELECT = 4,
+    /* popup */
+    TT_COLOR_SLOT_POPUP_TEXT = 0,
+    TT_COLOR_SLOT_POPUP_BOX = 1,
+    TT_COLOR_SLOT_POPUP_BUTTON_SELECT = 2,
+    TT_COLOR_SLOT_POPUP_BUTTON = 3,
 } tt_color_slots_t;
 
-void tt_elementResetColor(void *elementp, int32_t elementType);
+void tt_elementResetColor(void *elementp);
 
 int32_t tt_elementFree(void *elementp);
+
+void tt_hideAllElements();
 
 /* ribbon */
 
 /* ribbon variables */
 typedef struct {
+    tt_element_names_t element;
+    tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
+    int32_t color[8];
     uint8_t marginSize;
     int8_t mainselect[4]; // 0 - select, 1 - mouseHover, 2 - selected, 3 - premove close dropdown
     int8_t subselect[4]; // 0 - select, 1 - mouseHover, 2 - selected, 3 - free
@@ -47124,6 +47176,10 @@ void tt_ribbonUpdate();
 
 /* popup variables */
 typedef struct {
+    tt_element_names_t element;
+    tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
+    int32_t color[8];
     char *message; // message displayed on the popup
     double minX; // left edge of box
     double minY; // bottom of box
@@ -47167,19 +47223,13 @@ typedef struct {
     double dialAnchorY;
     double barAnchor;
     int32_t elementLogicTemp;
-    tt_element_priority_t elementLogicType;
+    tt_element_names_t elementLogicType;
     int32_t elementLogicIndex;
-    tt_element_priority_t elementLogicTypeOld;
+    tt_element_names_t elementLogicTypeOld;
     int32_t elementLogicIndexOld;
 } tt_globals_t;
 
 extern tt_globals_t tt_globals;
-
-typedef enum {
-    TT_ELEMENT_ENABLED = 0,
-    TT_ELEMENT_NO_MOUSE = 1,
-    TT_ELEMENT_HIDE = 2,
-} tt_element_enabled_t;
 
 #define TT_LABEL_LENGTH_LIMIT 128
 
@@ -47200,6 +47250,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47231,6 +47282,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47254,6 +47306,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47290,6 +47343,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47309,6 +47363,80 @@ typedef struct {
 } tt_slider_t;
 
 typedef enum {
+    TT_TEXTBOX_ALIGN_LEFT = 0,
+    TT_TEXTBOX_ALIGN_CENTER = 1,
+    TT_TEXTBOX_ALIGN_RIGHT = 2,
+} tt_textbox_align_t;
+
+/* textbox */
+typedef struct {
+    tt_element_names_t element;
+    tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
+    int32_t color[8];
+    double x;
+    double y;
+    double size;
+    char label[TT_LABEL_LENGTH_LIMIT];
+    int32_t status;
+    int8_t mouseOver;
+    tt_textbox_align_t align;
+    double length;
+    int32_t maxCharacters;
+    int32_t editIndex;
+    int32_t lastKey;
+    int32_t keyTimeout;
+    int32_t initialKeyTimeout;
+    int32_t heldKeyTimeout;
+    /* render variables */
+    double renderPixelOffset;
+    int32_t renderStartingIndex;
+    int32_t renderNumCharacters;
+    /* value */
+    char *text; // text of textbox
+    char *value; // text of textbox (duplicate name - always equal to text)
+    /* whitelist */
+    list_t *whitelist;
+    list_t *blacklist;
+} tt_textbox_t;
+
+typedef enum {
+    TT_DROPDOWN_ALIGN_LEFT = 0,
+    TT_DROPDOWN_ALIGN_CENTER = 1,
+    TT_DROPDOWN_ALIGN_RIGHT = 2,
+} tt_dropdown_align_t;
+
+typedef enum {
+    TT_DROPDOWN_DIRECTION_AUTO = 0,
+    TT_DROPDOWN_DIRECTION_AUTO_PREFER_UP = 1,
+    TT_DROPDOWN_DIRECTION_UP = 2,
+    TT_DROPDOWN_DIRECTION_DOWN = 3,
+} tt_dropdown_direction_t;
+
+/* dropdown */
+typedef struct {
+    tt_element_names_t element;
+    tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
+    int32_t color[8];
+    double x;
+    double y;
+    double size;
+    int32_t *variable; // bound variable (can be NULL)
+    char label[TT_LABEL_LENGTH_LIMIT];
+    list_t *options;
+    int32_t status;
+    tt_dropdown_align_t align;
+    tt_dropdown_direction_t direction;
+    double autoLowerBound;
+    double autoUpperBound;
+    double maxXfactor;
+    /* value */
+    int32_t index; // index of selected option
+    int32_t value; // index of selected option (duplicate name - always equal to index)
+} tt_dropdown_t;
+
+typedef enum {
     TT_SCROLLBAR_TYPE_HORIZONTAL = 0,
     TT_SCROLLBAR_TYPE_VERTICAL = 1,
 } tt_scrollbar_type_t;
@@ -47317,6 +47445,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47342,6 +47471,7 @@ typedef enum {
 typedef struct {
     tt_element_names_t element;
     tt_element_enabled_t enabled;
+    tt_element_ignored_t ignored;
     int32_t color[8];
     double x;
     double y;
@@ -47350,78 +47480,13 @@ typedef struct {
     list_t *options;
     int32_t status;
     tt_context_direction_t direction;
+    double autoLowerBound;
+    double autoRightBound;
     double maxXfactor;
     /* value */
     int32_t index; // index of selected option
     int32_t value; // index of selected option (duplicate name - always equal to index)
 } tt_context_t;
-
-typedef enum {
-    TT_DROPDOWN_ALIGN_LEFT = 0,
-    TT_DROPDOWN_ALIGN_CENTER = 1,
-    TT_DROPDOWN_ALIGN_RIGHT = 2,
-} tt_dropdown_align_t;
-
-typedef enum {
-    TT_DROPDOWN_DIRECTION_AUTO = 0,
-    TT_DROPDOWN_DIRECTION_AUTO_PREFER_UP = 1,
-    TT_DROPDOWN_DIRECTION_UP = 2,
-    TT_DROPDOWN_DIRECTION_DOWN = 3,
-} tt_dropdown_direction_t;
-
-/* dropdown */
-typedef struct {
-    tt_element_names_t element;
-    tt_element_enabled_t enabled;
-    int32_t color[8];
-    double x;
-    double y;
-    double size;
-    int32_t *variable; // bound variable (can be NULL)
-    char label[TT_LABEL_LENGTH_LIMIT];
-    list_t *options;
-    int32_t status;
-    tt_dropdown_align_t align;
-    tt_dropdown_direction_t direction;
-    double maxXfactor;
-    /* value */
-    int32_t index; // index of selected option
-    int32_t value; // index of selected option (duplicate name - always equal to index)
-} tt_dropdown_t;
-
-typedef enum {
-    TT_TEXTBOX_ALIGN_LEFT = 0,
-    TT_TEXTBOX_ALIGN_CENTER = 1,
-    TT_TEXTBOX_ALIGN_RIGHT = 2,
-} tt_textbox_align_t;
-
-typedef struct {
-    tt_element_names_t element;
-    tt_element_enabled_t enabled;
-    int32_t color[8];
-    double x;
-    double y;
-    double size;
-    char label[TT_LABEL_LENGTH_LIMIT];
-    int32_t status;
-    int8_t mouseOver;
-    tt_textbox_align_t align;
-    double length;
-    int32_t maxCharacters;
-    int32_t editIndex;
-    int32_t lastKey;
-    int32_t keyTimeout;
-    /* render variables */
-    double renderPixelOffset;
-    int32_t renderStartingIndex;
-    int32_t renderNumCharacters;
-    /* value */
-    char *text; // text of textbox
-    char *value; // text of textbox (duplicate name - always equal to text)
-    /* whitelist */
-    list_t *whitelist;
-    list_t *blacklist;
-} tt_textbox_t;
 
 /* initialise UI elements */
 
@@ -47445,6 +47510,18 @@ tt_slider_t *tt_sliderInit(char *label, double *variable, tt_slider_type_t type,
 
 void tt_sliderFree(tt_slider_t *sliderp);
 
+/* create a textbox */
+tt_textbox_t *tt_textboxInit(char *label, char *variable, int32_t maxCharacters, double x, double y, double size, double length);
+
+void tt_textboxFree(tt_textbox_t *textboxp);
+
+void tt_dropdownCalculateMax(tt_dropdown_t *dropdownp);
+
+/* create a dropdown - use a list of strings for options (options must have at least one string) */
+tt_dropdown_t *tt_dropdownInit(char *label, list_t *options, int32_t *variable, tt_dropdown_align_t align, double x, double y, double size);
+
+void tt_dropdownFree(tt_dropdown_t *dropdownp);
+
 /* create a scrollbar */
 tt_scrollbar_t *tt_scrollbarInit(double *variable, tt_scrollbar_type_t type, double x, double y, double size, double length, double barPercentage);
 
@@ -47455,18 +47532,6 @@ void tt_contextCalculateMax(tt_context_t *contextp);
 tt_context_t *tt_contextInit(list_t *options, int32_t *variable, double x, double y, double size);
 
 void tt_contextFree(tt_context_t *contextp);
-
-void tt_dropdownCalculateMax(tt_dropdown_t *dropdownp);
-
-/* create a dropdown - use a list of strings for options */
-tt_dropdown_t *tt_dropdownInit(char *label, list_t *options, int32_t *variable, tt_dropdown_align_t align, double x, double y, double size);
-
-void tt_dropdownFree(tt_dropdown_t *dropdownp);
-
-/* create a textbox */
-tt_textbox_t *tt_textboxInit(char *label, char *variable, uint32_t maxCharacters, double x, double y, double size, double length);
-
-void tt_textboxFree(tt_textbox_t *textboxp);
 
 /* update a button */
 void tt_buttonUpdate(tt_button_t *buttonp);
@@ -47483,20 +47548,6 @@ void tt_dialUpdate(tt_dial_t *dialp);
 /* update a slider */
 void tt_sliderUpdate(tt_slider_t *sliderp);
 
-/*
-update a scrollbar
-scrollbar range of motion (coordinates):
-scrollbar.length * (1 - scrollbar.barPercentage / 100)
-tip: try to match the ratio of visible content to the scrollbar's barPercentage - if half of the content can be shown on one screen then make the barPercentage 50
-*/
-void tt_scrollbarUpdate(tt_scrollbar_t *scrollbarp);
-
-/* update context */
-void tt_contextUpdate(tt_context_t *contextp);
-
-/* update dropdown */
-void tt_dropdownUpdate(tt_dropdown_t *dropdownp);
-
 void tt_textboxAddKey(tt_textbox_t *textboxp, int32_t key);
 
 void tt_textboxUnicodeCallback(uint32_t codepoint);
@@ -47507,7 +47558,22 @@ void tt_textboxKeyCallback(int32_t key, int32_t scancode, int32_t action);
 
 int32_t tt_textboxCalculateMaximumCharacters(uint32_t *charlist, int32_t textLength, double size, double lengthPixels, int8_t sweepDirection, double *outputLength);
 
+/* update a textbox */
 void tt_textboxUpdate(tt_textbox_t *textboxp);
+
+/* update a dropdown */
+void tt_dropdownUpdate(tt_dropdown_t *dropdownp);
+
+/*
+update a scrollbar
+scrollbar range of motion (coordinates):
+scrollbar.length * (1 - scrollbar.barPercentage / 100)
+tip: try to match the ratio of visible content to the scrollbar's barPercentage - if half of the content can be shown on one screen then make the barPercentage 50
+*/
+void tt_scrollbarUpdate(tt_scrollbar_t *scrollbarp);
+
+/* update a context */
+void tt_contextUpdate(tt_context_t *contextp);
 
 /* update all turtleTools */
 void turtleToolsUpdate();
@@ -47738,7 +47804,7 @@ int32_t osToolsCameraClose(char *name);
 #include <mfapi.h>
 #include <mfreadwrite.h>
 #include <wmcodecdsp.h>
-#endif
+#endif /* OS_WINDOWS */
 
 #ifdef OS_LINUX
 #include <fcntl.h>
@@ -47753,7 +47819,22 @@ int32_t osToolsCameraClose(char *name);
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <termios.h>
-#endif
+#endif /* OS_LINUX */
+
+#ifdef OS_BROWSER
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <arpa/inet.h>
+#include <termios.h>
+#endif /* OS_BROWSER */
 
 /* initialise osTools, pass in argv[0] from main function as well as GLFW window object */
 int32_t osToolsInit(char argv0[], GLFWwindow *window);
@@ -48153,9 +48234,11 @@ typedef enum {
         https://glad.dav1d.de/#profile=core&language=c&specification=gl&loader=on&api=gl%3D3.3
 */
 
+#ifndef OS_BROWSER
 
 #ifndef __glad_h_
 #define __glad_h_
+
 
 #ifdef __gl_h_
 #error OpenGL header already included, remove this include, glad already provides it
@@ -50259,7 +50342,2087 @@ GLAPI PFNGLSECONDARYCOLORP3UIVPROC glad_glSecondaryColorP3uiv;
 }
 #endif
 
+#endif /* __glad_h_ */
+
+#endif /* OS_BROWSER */
+
+#ifdef OS_BROWSER
+#ifndef __gles2_gl3_h_
+#define __gles2_gl3_h_ 1
+
+#ifdef __cplusplus
+extern "C" {
 #endif
+
+/*
+** Copyright 2013-2026 The Khronos Group Inc.
+** SPDX-License-Identifier: MIT
+**
+** This header is generated from the Khronos OpenGL / OpenGL ES XML
+** API Registry. The current version of the Registry, generator scripts
+** used to make the header, and the header can be found at
+**   https://github.com/KhronosGroup/OpenGL-Registry
+*/
+
+#include <GLES3/gl3platform.h>
+
+#ifndef GL_APIENTRYP
+#define GL_APIENTRYP GL_APIENTRY*
+#endif
+
+#ifndef GL_GLES_PROTOTYPES
+#define GL_GLES_PROTOTYPES 1
+#endif
+
+/* Generated on date 20260126 */
+
+/* Generated C header for:
+ * API: gles2
+ * Profile: common
+ * Versions considered: 2\.[0-9]|3\.0
+ * Versions emitted: .*
+ * Default extensions included: None
+ * Additional extensions included: _nomatch_^
+ * Extensions removed: _nomatch_^
+ */
+
+#ifndef GL_ES_VERSION_2_0
+#define GL_ES_VERSION_2_0 1
+#include <KHR/khrplatform.h>
+typedef khronos_int8_t GLbyte;
+typedef khronos_float_t GLclampf;
+typedef khronos_int32_t GLfixed;
+typedef khronos_int16_t GLshort;
+typedef khronos_uint16_t GLushort;
+typedef void GLvoid;
+typedef struct __GLsync *GLsync;
+typedef khronos_int64_t GLint64;
+typedef khronos_uint64_t GLuint64;
+typedef unsigned int GLenum;
+typedef unsigned int GLuint;
+typedef char GLchar;
+typedef khronos_float_t GLfloat;
+typedef khronos_ssize_t GLsizeiptr;
+typedef khronos_intptr_t GLintptr;
+typedef unsigned int GLbitfield;
+typedef int GLint;
+typedef unsigned char GLboolean;
+typedef int GLsizei;
+typedef khronos_uint8_t GLubyte;
+#define GL_DEPTH_BUFFER_BIT               0x00000100
+#define GL_STENCIL_BUFFER_BIT             0x00000400
+#define GL_COLOR_BUFFER_BIT               0x00004000
+#define GL_FALSE                          0
+#define GL_TRUE                           1
+#define GL_POINTS                         0x0000
+#define GL_LINES                          0x0001
+#define GL_LINE_LOOP                      0x0002
+#define GL_LINE_STRIP                     0x0003
+#define GL_TRIANGLES                      0x0004
+#define GL_TRIANGLE_STRIP                 0x0005
+#define GL_TRIANGLE_FAN                   0x0006
+#define GL_ZERO                           0
+#define GL_ONE                            1
+#define GL_SRC_COLOR                      0x0300
+#define GL_ONE_MINUS_SRC_COLOR            0x0301
+#define GL_SRC_ALPHA                      0x0302
+#define GL_ONE_MINUS_SRC_ALPHA            0x0303
+#define GL_DST_ALPHA                      0x0304
+#define GL_ONE_MINUS_DST_ALPHA            0x0305
+#define GL_DST_COLOR                      0x0306
+#define GL_ONE_MINUS_DST_COLOR            0x0307
+#define GL_SRC_ALPHA_SATURATE             0x0308
+#define GL_FUNC_ADD                       0x8006
+#define GL_BLEND_EQUATION                 0x8009
+#define GL_BLEND_EQUATION_RGB             0x8009
+#define GL_BLEND_EQUATION_ALPHA           0x883D
+#define GL_FUNC_SUBTRACT                  0x800A
+#define GL_FUNC_REVERSE_SUBTRACT          0x800B
+#define GL_BLEND_DST_RGB                  0x80C8
+#define GL_BLEND_SRC_RGB                  0x80C9
+#define GL_BLEND_DST_ALPHA                0x80CA
+#define GL_BLEND_SRC_ALPHA                0x80CB
+#define GL_CONSTANT_COLOR                 0x8001
+#define GL_ONE_MINUS_CONSTANT_COLOR       0x8002
+#define GL_CONSTANT_ALPHA                 0x8003
+#define GL_ONE_MINUS_CONSTANT_ALPHA       0x8004
+#define GL_BLEND_COLOR                    0x8005
+#define GL_ARRAY_BUFFER                   0x8892
+#define GL_ELEMENT_ARRAY_BUFFER           0x8893
+#define GL_ARRAY_BUFFER_BINDING           0x8894
+#define GL_ELEMENT_ARRAY_BUFFER_BINDING   0x8895
+#define GL_STREAM_DRAW                    0x88E0
+#define GL_STATIC_DRAW                    0x88E4
+#define GL_DYNAMIC_DRAW                   0x88E8
+#define GL_BUFFER_SIZE                    0x8764
+#define GL_BUFFER_USAGE                   0x8765
+#define GL_CURRENT_VERTEX_ATTRIB          0x8626
+#define GL_FRONT                          0x0404
+#define GL_BACK                           0x0405
+#define GL_FRONT_AND_BACK                 0x0408
+#define GL_TEXTURE_2D                     0x0DE1
+#define GL_CULL_FACE                      0x0B44
+#define GL_BLEND                          0x0BE2
+#define GL_DITHER                         0x0BD0
+#define GL_STENCIL_TEST                   0x0B90
+#define GL_DEPTH_TEST                     0x0B71
+#define GL_SCISSOR_TEST                   0x0C11
+#define GL_POLYGON_OFFSET_FILL            0x8037
+#define GL_SAMPLE_ALPHA_TO_COVERAGE       0x809E
+#define GL_SAMPLE_COVERAGE                0x80A0
+#define GL_NO_ERROR                       0
+#define GL_INVALID_ENUM                   0x0500
+#define GL_INVALID_VALUE                  0x0501
+#define GL_INVALID_OPERATION              0x0502
+#define GL_OUT_OF_MEMORY                  0x0505
+#define GL_CW                             0x0900
+#define GL_CCW                            0x0901
+#define GL_LINE_WIDTH                     0x0B21
+#define GL_ALIASED_POINT_SIZE_RANGE       0x846D
+#define GL_ALIASED_LINE_WIDTH_RANGE       0x846E
+#define GL_CULL_FACE_MODE                 0x0B45
+#define GL_FRONT_FACE                     0x0B46
+#define GL_DEPTH_RANGE                    0x0B70
+#define GL_DEPTH_WRITEMASK                0x0B72
+#define GL_DEPTH_CLEAR_VALUE              0x0B73
+#define GL_DEPTH_FUNC                     0x0B74
+#define GL_STENCIL_CLEAR_VALUE            0x0B91
+#define GL_STENCIL_FUNC                   0x0B92
+#define GL_STENCIL_FAIL                   0x0B94
+#define GL_STENCIL_PASS_DEPTH_FAIL        0x0B95
+#define GL_STENCIL_PASS_DEPTH_PASS        0x0B96
+#define GL_STENCIL_REF                    0x0B97
+#define GL_STENCIL_VALUE_MASK             0x0B93
+#define GL_STENCIL_WRITEMASK              0x0B98
+#define GL_STENCIL_BACK_FUNC              0x8800
+#define GL_STENCIL_BACK_FAIL              0x8801
+#define GL_STENCIL_BACK_PASS_DEPTH_FAIL   0x8802
+#define GL_STENCIL_BACK_PASS_DEPTH_PASS   0x8803
+#define GL_STENCIL_BACK_REF               0x8CA3
+#define GL_STENCIL_BACK_VALUE_MASK        0x8CA4
+#define GL_STENCIL_BACK_WRITEMASK         0x8CA5
+#define GL_VIEWPORT                       0x0BA2
+#define GL_SCISSOR_BOX                    0x0C10
+#define GL_COLOR_CLEAR_VALUE              0x0C22
+#define GL_COLOR_WRITEMASK                0x0C23
+#define GL_UNPACK_ALIGNMENT               0x0CF5
+#define GL_PACK_ALIGNMENT                 0x0D05
+#define GL_MAX_TEXTURE_SIZE               0x0D33
+#define GL_MAX_VIEWPORT_DIMS              0x0D3A
+#define GL_SUBPIXEL_BITS                  0x0D50
+#define GL_RED_BITS                       0x0D52
+#define GL_GREEN_BITS                     0x0D53
+#define GL_BLUE_BITS                      0x0D54
+#define GL_ALPHA_BITS                     0x0D55
+#define GL_DEPTH_BITS                     0x0D56
+#define GL_STENCIL_BITS                   0x0D57
+#define GL_POLYGON_OFFSET_UNITS           0x2A00
+#define GL_POLYGON_OFFSET_FACTOR          0x8038
+#define GL_TEXTURE_BINDING_2D             0x8069
+#define GL_SAMPLE_BUFFERS                 0x80A8
+#define GL_SAMPLES                        0x80A9
+#define GL_SAMPLE_COVERAGE_VALUE          0x80AA
+#define GL_SAMPLE_COVERAGE_INVERT         0x80AB
+#define GL_NUM_COMPRESSED_TEXTURE_FORMATS 0x86A2
+#define GL_COMPRESSED_TEXTURE_FORMATS     0x86A3
+#define GL_DONT_CARE                      0x1100
+#define GL_FASTEST                        0x1101
+#define GL_NICEST                         0x1102
+#define GL_GENERATE_MIPMAP_HINT           0x8192
+#define GL_BYTE                           0x1400
+#define GL_UNSIGNED_BYTE                  0x1401
+#define GL_SHORT                          0x1402
+#define GL_UNSIGNED_SHORT                 0x1403
+#define GL_INT                            0x1404
+#define GL_UNSIGNED_INT                   0x1405
+#define GL_FLOAT                          0x1406
+#define GL_FIXED                          0x140C
+#define GL_DEPTH_COMPONENT                0x1902
+#define GL_ALPHA                          0x1906
+#define GL_RGB                            0x1907
+#define GL_RGBA                           0x1908
+#define GL_LUMINANCE                      0x1909
+#define GL_LUMINANCE_ALPHA                0x190A
+#define GL_UNSIGNED_SHORT_4_4_4_4         0x8033
+#define GL_UNSIGNED_SHORT_5_5_5_1         0x8034
+#define GL_UNSIGNED_SHORT_5_6_5           0x8363
+#define GL_FRAGMENT_SHADER                0x8B30
+#define GL_VERTEX_SHADER                  0x8B31
+#define GL_MAX_VERTEX_ATTRIBS             0x8869
+#define GL_MAX_VERTEX_UNIFORM_VECTORS     0x8DFB
+#define GL_MAX_VARYING_VECTORS            0x8DFC
+#define GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS 0x8B4D
+#define GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS 0x8B4C
+#define GL_MAX_TEXTURE_IMAGE_UNITS        0x8872
+#define GL_MAX_FRAGMENT_UNIFORM_VECTORS   0x8DFD
+#define GL_SHADER_TYPE                    0x8B4F
+#define GL_DELETE_STATUS                  0x8B80
+#define GL_LINK_STATUS                    0x8B82
+#define GL_VALIDATE_STATUS                0x8B83
+#define GL_ATTACHED_SHADERS               0x8B85
+#define GL_ACTIVE_UNIFORMS                0x8B86
+#define GL_ACTIVE_UNIFORM_MAX_LENGTH      0x8B87
+#define GL_ACTIVE_ATTRIBUTES              0x8B89
+#define GL_ACTIVE_ATTRIBUTE_MAX_LENGTH    0x8B8A
+#define GL_SHADING_LANGUAGE_VERSION       0x8B8C
+#define GL_CURRENT_PROGRAM                0x8B8D
+#define GL_NEVER                          0x0200
+#define GL_LESS                           0x0201
+#define GL_EQUAL                          0x0202
+#define GL_LEQUAL                         0x0203
+#define GL_GREATER                        0x0204
+#define GL_NOTEQUAL                       0x0205
+#define GL_GEQUAL                         0x0206
+#define GL_ALWAYS                         0x0207
+#define GL_KEEP                           0x1E00
+#define GL_REPLACE                        0x1E01
+#define GL_INCR                           0x1E02
+#define GL_DECR                           0x1E03
+#define GL_INVERT                         0x150A
+#define GL_INCR_WRAP                      0x8507
+#define GL_DECR_WRAP                      0x8508
+#define GL_VENDOR                         0x1F00
+#define GL_RENDERER                       0x1F01
+#define GL_VERSION                        0x1F02
+#define GL_EXTENSIONS                     0x1F03
+#define GL_NEAREST                        0x2600
+#define GL_LINEAR                         0x2601
+#define GL_NEAREST_MIPMAP_NEAREST         0x2700
+#define GL_LINEAR_MIPMAP_NEAREST          0x2701
+#define GL_NEAREST_MIPMAP_LINEAR          0x2702
+#define GL_LINEAR_MIPMAP_LINEAR           0x2703
+#define GL_TEXTURE_MAG_FILTER             0x2800
+#define GL_TEXTURE_MIN_FILTER             0x2801
+#define GL_TEXTURE_WRAP_S                 0x2802
+#define GL_TEXTURE_WRAP_T                 0x2803
+#define GL_TEXTURE                        0x1702
+#define GL_TEXTURE_CUBE_MAP               0x8513
+#define GL_TEXTURE_BINDING_CUBE_MAP       0x8514
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X    0x8515
+#define GL_TEXTURE_CUBE_MAP_NEGATIVE_X    0x8516
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_Y    0x8517
+#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Y    0x8518
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_Z    0x8519
+#define GL_TEXTURE_CUBE_MAP_NEGATIVE_Z    0x851A
+#define GL_MAX_CUBE_MAP_TEXTURE_SIZE      0x851C
+#define GL_TEXTURE0                       0x84C0
+#define GL_TEXTURE1                       0x84C1
+#define GL_TEXTURE2                       0x84C2
+#define GL_TEXTURE3                       0x84C3
+#define GL_TEXTURE4                       0x84C4
+#define GL_TEXTURE5                       0x84C5
+#define GL_TEXTURE6                       0x84C6
+#define GL_TEXTURE7                       0x84C7
+#define GL_TEXTURE8                       0x84C8
+#define GL_TEXTURE9                       0x84C9
+#define GL_TEXTURE10                      0x84CA
+#define GL_TEXTURE11                      0x84CB
+#define GL_TEXTURE12                      0x84CC
+#define GL_TEXTURE13                      0x84CD
+#define GL_TEXTURE14                      0x84CE
+#define GL_TEXTURE15                      0x84CF
+#define GL_TEXTURE16                      0x84D0
+#define GL_TEXTURE17                      0x84D1
+#define GL_TEXTURE18                      0x84D2
+#define GL_TEXTURE19                      0x84D3
+#define GL_TEXTURE20                      0x84D4
+#define GL_TEXTURE21                      0x84D5
+#define GL_TEXTURE22                      0x84D6
+#define GL_TEXTURE23                      0x84D7
+#define GL_TEXTURE24                      0x84D8
+#define GL_TEXTURE25                      0x84D9
+#define GL_TEXTURE26                      0x84DA
+#define GL_TEXTURE27                      0x84DB
+#define GL_TEXTURE28                      0x84DC
+#define GL_TEXTURE29                      0x84DD
+#define GL_TEXTURE30                      0x84DE
+#define GL_TEXTURE31                      0x84DF
+#define GL_ACTIVE_TEXTURE                 0x84E0
+#define GL_REPEAT                         0x2901
+#define GL_CLAMP_TO_EDGE                  0x812F
+#define GL_MIRRORED_REPEAT                0x8370
+#define GL_FLOAT_VEC2                     0x8B50
+#define GL_FLOAT_VEC3                     0x8B51
+#define GL_FLOAT_VEC4                     0x8B52
+#define GL_INT_VEC2                       0x8B53
+#define GL_INT_VEC3                       0x8B54
+#define GL_INT_VEC4                       0x8B55
+#define GL_BOOL                           0x8B56
+#define GL_BOOL_VEC2                      0x8B57
+#define GL_BOOL_VEC3                      0x8B58
+#define GL_BOOL_VEC4                      0x8B59
+#define GL_FLOAT_MAT2                     0x8B5A
+#define GL_FLOAT_MAT3                     0x8B5B
+#define GL_FLOAT_MAT4                     0x8B5C
+#define GL_SAMPLER_2D                     0x8B5E
+#define GL_SAMPLER_CUBE                   0x8B60
+#define GL_VERTEX_ATTRIB_ARRAY_ENABLED    0x8622
+#define GL_VERTEX_ATTRIB_ARRAY_SIZE       0x8623
+#define GL_VERTEX_ATTRIB_ARRAY_STRIDE     0x8624
+#define GL_VERTEX_ATTRIB_ARRAY_TYPE       0x8625
+#define GL_VERTEX_ATTRIB_ARRAY_NORMALIZED 0x886A
+#define GL_VERTEX_ATTRIB_ARRAY_POINTER    0x8645
+#define GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING 0x889F
+#define GL_IMPLEMENTATION_COLOR_READ_TYPE 0x8B9A
+#define GL_IMPLEMENTATION_COLOR_READ_FORMAT 0x8B9B
+#define GL_COMPILE_STATUS                 0x8B81
+#define GL_INFO_LOG_LENGTH                0x8B84
+#define GL_SHADER_SOURCE_LENGTH           0x8B88
+#define GL_SHADER_COMPILER                0x8DFA
+#define GL_SHADER_BINARY_FORMATS          0x8DF8
+#define GL_NUM_SHADER_BINARY_FORMATS      0x8DF9
+#define GL_LOW_FLOAT                      0x8DF0
+#define GL_MEDIUM_FLOAT                   0x8DF1
+#define GL_HIGH_FLOAT                     0x8DF2
+#define GL_LOW_INT                        0x8DF3
+#define GL_MEDIUM_INT                     0x8DF4
+#define GL_HIGH_INT                       0x8DF5
+#define GL_FRAMEBUFFER                    0x8D40
+#define GL_RENDERBUFFER                   0x8D41
+#define GL_RGBA4                          0x8056
+#define GL_RGB5_A1                        0x8057
+#define GL_RGB565                         0x8D62
+#define GL_DEPTH_COMPONENT16              0x81A5
+#define GL_STENCIL_INDEX8                 0x8D48
+#define GL_RENDERBUFFER_WIDTH             0x8D42
+#define GL_RENDERBUFFER_HEIGHT            0x8D43
+#define GL_RENDERBUFFER_INTERNAL_FORMAT   0x8D44
+#define GL_RENDERBUFFER_RED_SIZE          0x8D50
+#define GL_RENDERBUFFER_GREEN_SIZE        0x8D51
+#define GL_RENDERBUFFER_BLUE_SIZE         0x8D52
+#define GL_RENDERBUFFER_ALPHA_SIZE        0x8D53
+#define GL_RENDERBUFFER_DEPTH_SIZE        0x8D54
+#define GL_RENDERBUFFER_STENCIL_SIZE      0x8D55
+#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE 0x8CD0
+#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL 0x8CD2
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE 0x8CD3
+#define GL_COLOR_ATTACHMENT0              0x8CE0
+#define GL_DEPTH_ATTACHMENT               0x8D00
+#define GL_STENCIL_ATTACHMENT             0x8D20
+#define GL_NONE                           0
+#define GL_FRAMEBUFFER_COMPLETE           0x8CD5
+#define GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT 0x8CD6
+#define GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT 0x8CD7
+#define GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS 0x8CD9
+#define GL_FRAMEBUFFER_UNSUPPORTED        0x8CDD
+#define GL_FRAMEBUFFER_BINDING            0x8CA6
+#define GL_RENDERBUFFER_BINDING           0x8CA7
+#define GL_MAX_RENDERBUFFER_SIZE          0x84E8
+#define GL_INVALID_FRAMEBUFFER_OPERATION  0x0506
+typedef void (GL_APIENTRYP PFNGLACTIVETEXTUREPROC) (GLenum texture);
+typedef void (GL_APIENTRYP PFNGLATTACHSHADERPROC) (GLuint program, GLuint shader);
+typedef void (GL_APIENTRYP PFNGLBINDATTRIBLOCATIONPROC) (GLuint program, GLuint index, const GLchar *name);
+typedef void (GL_APIENTRYP PFNGLBINDBUFFERPROC) (GLenum target, GLuint buffer);
+typedef void (GL_APIENTRYP PFNGLBINDFRAMEBUFFERPROC) (GLenum target, GLuint framebuffer);
+typedef void (GL_APIENTRYP PFNGLBINDRENDERBUFFERPROC) (GLenum target, GLuint renderbuffer);
+typedef void (GL_APIENTRYP PFNGLBINDTEXTUREPROC) (GLenum target, GLuint texture);
+typedef void (GL_APIENTRYP PFNGLBLENDCOLORPROC) (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
+typedef void (GL_APIENTRYP PFNGLBLENDEQUATIONPROC) (GLenum mode);
+typedef void (GL_APIENTRYP PFNGLBLENDEQUATIONSEPARATEPROC) (GLenum modeRGB, GLenum modeAlpha);
+typedef void (GL_APIENTRYP PFNGLBLENDFUNCPROC) (GLenum sfactor, GLenum dfactor);
+typedef void (GL_APIENTRYP PFNGLBLENDFUNCSEPARATEPROC) (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha);
+typedef void (GL_APIENTRYP PFNGLBUFFERDATAPROC) (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+typedef void (GL_APIENTRYP PFNGLBUFFERSUBDATAPROC) (GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
+typedef GLenum (GL_APIENTRYP PFNGLCHECKFRAMEBUFFERSTATUSPROC) (GLenum target);
+typedef void (GL_APIENTRYP PFNGLCLEARPROC) (GLbitfield mask);
+typedef void (GL_APIENTRYP PFNGLCLEARCOLORPROC) (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
+typedef void (GL_APIENTRYP PFNGLCLEARDEPTHFPROC) (GLfloat d);
+typedef void (GL_APIENTRYP PFNGLCLEARSTENCILPROC) (GLint s);
+typedef void (GL_APIENTRYP PFNGLCOLORMASKPROC) (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
+typedef void (GL_APIENTRYP PFNGLCOMPILESHADERPROC) (GLuint shader);
+typedef void (GL_APIENTRYP PFNGLCOMPRESSEDTEXIMAGE2DPROC) (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
+typedef void (GL_APIENTRYP PFNGLCOMPRESSEDTEXSUBIMAGE2DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data);
+typedef void (GL_APIENTRYP PFNGLCOPYTEXIMAGE2DPROC) (GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+typedef void (GL_APIENTRYP PFNGLCOPYTEXSUBIMAGE2DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
+typedef GLuint (GL_APIENTRYP PFNGLCREATEPROGRAMPROC) (void);
+typedef GLuint (GL_APIENTRYP PFNGLCREATESHADERPROC) (GLenum type);
+typedef void (GL_APIENTRYP PFNGLCULLFACEPROC) (GLenum mode);
+typedef void (GL_APIENTRYP PFNGLDELETEBUFFERSPROC) (GLsizei n, const GLuint *buffers);
+typedef void (GL_APIENTRYP PFNGLDELETEFRAMEBUFFERSPROC) (GLsizei n, const GLuint *framebuffers);
+typedef void (GL_APIENTRYP PFNGLDELETEPROGRAMPROC) (GLuint program);
+typedef void (GL_APIENTRYP PFNGLDELETERENDERBUFFERSPROC) (GLsizei n, const GLuint *renderbuffers);
+typedef void (GL_APIENTRYP PFNGLDELETESHADERPROC) (GLuint shader);
+typedef void (GL_APIENTRYP PFNGLDELETETEXTURESPROC) (GLsizei n, const GLuint *textures);
+typedef void (GL_APIENTRYP PFNGLDEPTHFUNCPROC) (GLenum func);
+typedef void (GL_APIENTRYP PFNGLDEPTHMASKPROC) (GLboolean flag);
+typedef void (GL_APIENTRYP PFNGLDEPTHRANGEFPROC) (GLfloat n, GLfloat f);
+typedef void (GL_APIENTRYP PFNGLDETACHSHADERPROC) (GLuint program, GLuint shader);
+typedef void (GL_APIENTRYP PFNGLDISABLEPROC) (GLenum cap);
+typedef void (GL_APIENTRYP PFNGLDISABLEVERTEXATTRIBARRAYPROC) (GLuint index);
+typedef void (GL_APIENTRYP PFNGLDRAWARRAYSPROC) (GLenum mode, GLint first, GLsizei count);
+typedef void (GL_APIENTRYP PFNGLDRAWELEMENTSPROC) (GLenum mode, GLsizei count, GLenum type, const void *indices);
+typedef void (GL_APIENTRYP PFNGLENABLEPROC) (GLenum cap);
+typedef void (GL_APIENTRYP PFNGLENABLEVERTEXATTRIBARRAYPROC) (GLuint index);
+typedef void (GL_APIENTRYP PFNGLFINISHPROC) (void);
+typedef void (GL_APIENTRYP PFNGLFLUSHPROC) (void);
+typedef void (GL_APIENTRYP PFNGLFRAMEBUFFERRENDERBUFFERPROC) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+typedef void (GL_APIENTRYP PFNGLFRAMEBUFFERTEXTURE2DPROC) (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+typedef void (GL_APIENTRYP PFNGLFRONTFACEPROC) (GLenum mode);
+typedef void (GL_APIENTRYP PFNGLGENBUFFERSPROC) (GLsizei n, GLuint *buffers);
+typedef void (GL_APIENTRYP PFNGLGENERATEMIPMAPPROC) (GLenum target);
+typedef void (GL_APIENTRYP PFNGLGENFRAMEBUFFERSPROC) (GLsizei n, GLuint *framebuffers);
+typedef void (GL_APIENTRYP PFNGLGENRENDERBUFFERSPROC) (GLsizei n, GLuint *renderbuffers);
+typedef void (GL_APIENTRYP PFNGLGENTEXTURESPROC) (GLsizei n, GLuint *textures);
+typedef void (GL_APIENTRYP PFNGLGETACTIVEATTRIBPROC) (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
+typedef void (GL_APIENTRYP PFNGLGETACTIVEUNIFORMPROC) (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
+typedef void (GL_APIENTRYP PFNGLGETATTACHEDSHADERSPROC) (GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders);
+typedef GLint (GL_APIENTRYP PFNGLGETATTRIBLOCATIONPROC) (GLuint program, const GLchar *name);
+typedef void (GL_APIENTRYP PFNGLGETBOOLEANVPROC) (GLenum pname, GLboolean *data);
+typedef void (GL_APIENTRYP PFNGLGETBUFFERPARAMETERIVPROC) (GLenum target, GLenum pname, GLint *params);
+typedef GLenum (GL_APIENTRYP PFNGLGETERRORPROC) (void);
+typedef void (GL_APIENTRYP PFNGLGETFLOATVPROC) (GLenum pname, GLfloat *data);
+typedef void (GL_APIENTRYP PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC) (GLenum target, GLenum attachment, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETINTEGERVPROC) (GLenum pname, GLint *data);
+typedef void (GL_APIENTRYP PFNGLGETPROGRAMIVPROC) (GLuint program, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETPROGRAMINFOLOGPROC) (GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+typedef void (GL_APIENTRYP PFNGLGETRENDERBUFFERPARAMETERIVPROC) (GLenum target, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETSHADERIVPROC) (GLuint shader, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETSHADERINFOLOGPROC) (GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+typedef void (GL_APIENTRYP PFNGLGETSHADERPRECISIONFORMATPROC) (GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision);
+typedef void (GL_APIENTRYP PFNGLGETSHADERSOURCEPROC) (GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source);
+typedef const GLubyte *(GL_APIENTRYP PFNGLGETSTRINGPROC) (GLenum name);
+typedef void (GL_APIENTRYP PFNGLGETTEXPARAMETERFVPROC) (GLenum target, GLenum pname, GLfloat *params);
+typedef void (GL_APIENTRYP PFNGLGETTEXPARAMETERIVPROC) (GLenum target, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETUNIFORMFVPROC) (GLuint program, GLint location, GLfloat *params);
+typedef void (GL_APIENTRYP PFNGLGETUNIFORMIVPROC) (GLuint program, GLint location, GLint *params);
+typedef GLint (GL_APIENTRYP PFNGLGETUNIFORMLOCATIONPROC) (GLuint program, const GLchar *name);
+typedef void (GL_APIENTRYP PFNGLGETVERTEXATTRIBFVPROC) (GLuint index, GLenum pname, GLfloat *params);
+typedef void (GL_APIENTRYP PFNGLGETVERTEXATTRIBIVPROC) (GLuint index, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETVERTEXATTRIBPOINTERVPROC) (GLuint index, GLenum pname, void **pointer);
+typedef void (GL_APIENTRYP PFNGLHINTPROC) (GLenum target, GLenum mode);
+typedef GLboolean (GL_APIENTRYP PFNGLISBUFFERPROC) (GLuint buffer);
+typedef GLboolean (GL_APIENTRYP PFNGLISENABLEDPROC) (GLenum cap);
+typedef GLboolean (GL_APIENTRYP PFNGLISFRAMEBUFFERPROC) (GLuint framebuffer);
+typedef GLboolean (GL_APIENTRYP PFNGLISPROGRAMPROC) (GLuint program);
+typedef GLboolean (GL_APIENTRYP PFNGLISRENDERBUFFERPROC) (GLuint renderbuffer);
+typedef GLboolean (GL_APIENTRYP PFNGLISSHADERPROC) (GLuint shader);
+typedef GLboolean (GL_APIENTRYP PFNGLISTEXTUREPROC) (GLuint texture);
+typedef void (GL_APIENTRYP PFNGLLINEWIDTHPROC) (GLfloat width);
+typedef void (GL_APIENTRYP PFNGLLINKPROGRAMPROC) (GLuint program);
+typedef void (GL_APIENTRYP PFNGLPIXELSTOREIPROC) (GLenum pname, GLint param);
+typedef void (GL_APIENTRYP PFNGLPOLYGONOFFSETPROC) (GLfloat factor, GLfloat units);
+typedef void (GL_APIENTRYP PFNGLREADPIXELSPROC) (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void *pixels);
+typedef void (GL_APIENTRYP PFNGLRELEASESHADERCOMPILERPROC) (void);
+typedef void (GL_APIENTRYP PFNGLRENDERBUFFERSTORAGEPROC) (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLSAMPLECOVERAGEPROC) (GLfloat value, GLboolean invert);
+typedef void (GL_APIENTRYP PFNGLSCISSORPROC) (GLint x, GLint y, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLSHADERBINARYPROC) (GLsizei count, const GLuint *shaders, GLenum binaryFormat, const void *binary, GLsizei length);
+typedef void (GL_APIENTRYP PFNGLSHADERSOURCEPROC) (GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length);
+typedef void (GL_APIENTRYP PFNGLSTENCILFUNCPROC) (GLenum func, GLint ref, GLuint mask);
+typedef void (GL_APIENTRYP PFNGLSTENCILFUNCSEPARATEPROC) (GLenum face, GLenum func, GLint ref, GLuint mask);
+typedef void (GL_APIENTRYP PFNGLSTENCILMASKPROC) (GLuint mask);
+typedef void (GL_APIENTRYP PFNGLSTENCILMASKSEPARATEPROC) (GLenum face, GLuint mask);
+typedef void (GL_APIENTRYP PFNGLSTENCILOPPROC) (GLenum fail, GLenum zfail, GLenum zpass);
+typedef void (GL_APIENTRYP PFNGLSTENCILOPSEPARATEPROC) (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
+typedef void (GL_APIENTRYP PFNGLTEXIMAGE2DPROC) (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
+typedef void (GL_APIENTRYP PFNGLTEXPARAMETERFPROC) (GLenum target, GLenum pname, GLfloat param);
+typedef void (GL_APIENTRYP PFNGLTEXPARAMETERFVPROC) (GLenum target, GLenum pname, const GLfloat *params);
+typedef void (GL_APIENTRYP PFNGLTEXPARAMETERIPROC) (GLenum target, GLenum pname, GLint param);
+typedef void (GL_APIENTRYP PFNGLTEXPARAMETERIVPROC) (GLenum target, GLenum pname, const GLint *params);
+typedef void (GL_APIENTRYP PFNGLTEXSUBIMAGE2DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1FPROC) (GLint location, GLfloat v0);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1FVPROC) (GLint location, GLsizei count, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1IPROC) (GLint location, GLint v0);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1IVPROC) (GLint location, GLsizei count, const GLint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2FPROC) (GLint location, GLfloat v0, GLfloat v1);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2FVPROC) (GLint location, GLsizei count, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2IPROC) (GLint location, GLint v0, GLint v1);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2IVPROC) (GLint location, GLsizei count, const GLint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3FVPROC) (GLint location, GLsizei count, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3IPROC) (GLint location, GLint v0, GLint v1, GLint v2);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3IVPROC) (GLint location, GLsizei count, const GLint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4FVPROC) (GLint location, GLsizei count, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4IPROC) (GLint location, GLint v0, GLint v1, GLint v2, GLint v3);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4IVPROC) (GLint location, GLsizei count, const GLint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX2FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX3FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX4FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUSEPROGRAMPROC) (GLuint program);
+typedef void (GL_APIENTRYP PFNGLVALIDATEPROGRAMPROC) (GLuint program);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB1FPROC) (GLuint index, GLfloat x);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB1FVPROC) (GLuint index, const GLfloat *v);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB2FPROC) (GLuint index, GLfloat x, GLfloat y);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB2FVPROC) (GLuint index, const GLfloat *v);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB3FPROC) (GLuint index, GLfloat x, GLfloat y, GLfloat z);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB3FVPROC) (GLuint index, const GLfloat *v);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB4FPROC) (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIB4FVPROC) (GLuint index, const GLfloat *v);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBPOINTERPROC) (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
+typedef void (GL_APIENTRYP PFNGLVIEWPORTPROC) (GLint x, GLint y, GLsizei width, GLsizei height);
+#if GL_GLES_PROTOTYPES
+GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture);
+GL_APICALL void GL_APIENTRY glAttachShader (GLuint program, GLuint shader);
+GL_APICALL void GL_APIENTRY glBindAttribLocation (GLuint program, GLuint index, const GLchar *name);
+GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer);
+GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer);
+GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer);
+GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture);
+GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
+GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode);
+GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha);
+GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor);
+GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha);
+GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
+GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target);
+GL_APICALL void GL_APIENTRY glClear (GLbitfield mask);
+GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
+GL_APICALL void GL_APIENTRY glClearDepthf (GLfloat d);
+GL_APICALL void GL_APIENTRY glClearStencil (GLint s);
+GL_APICALL void GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
+GL_APICALL void GL_APIENTRY glCompileShader (GLuint shader);
+GL_APICALL void GL_APIENTRY glCompressedTexImage2D (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
+GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data);
+GL_APICALL void GL_APIENTRY glCopyTexImage2D (GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+GL_APICALL void GL_APIENTRY glCopyTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
+GL_APICALL GLuint GL_APIENTRY glCreateProgram (void);
+GL_APICALL GLuint GL_APIENTRY glCreateShader (GLenum type);
+GL_APICALL void GL_APIENTRY glCullFace (GLenum mode);
+GL_APICALL void GL_APIENTRY glDeleteBuffers (GLsizei n, const GLuint *buffers);
+GL_APICALL void GL_APIENTRY glDeleteFramebuffers (GLsizei n, const GLuint *framebuffers);
+GL_APICALL void GL_APIENTRY glDeleteProgram (GLuint program);
+GL_APICALL void GL_APIENTRY glDeleteRenderbuffers (GLsizei n, const GLuint *renderbuffers);
+GL_APICALL void GL_APIENTRY glDeleteShader (GLuint shader);
+GL_APICALL void GL_APIENTRY glDeleteTextures (GLsizei n, const GLuint *textures);
+GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func);
+GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag);
+GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f);
+GL_APICALL void GL_APIENTRY glDetachShader (GLuint program, GLuint shader);
+GL_APICALL void GL_APIENTRY glDisable (GLenum cap);
+GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index);
+GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count);
+GL_APICALL void GL_APIENTRY glDrawElements (GLenum mode, GLsizei count, GLenum type, const void *indices);
+GL_APICALL void GL_APIENTRY glEnable (GLenum cap);
+GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index);
+GL_APICALL void GL_APIENTRY glFinish (void);
+GL_APICALL void GL_APIENTRY glFlush (void);
+GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+GL_APICALL void GL_APIENTRY glFrontFace (GLenum mode);
+GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers);
+GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target);
+GL_APICALL void GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint *framebuffers);
+GL_APICALL void GL_APIENTRY glGenRenderbuffers (GLsizei n, GLuint *renderbuffers);
+GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures);
+GL_APICALL void GL_APIENTRY glGetActiveAttrib (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
+GL_APICALL void GL_APIENTRY glGetActiveUniform (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
+GL_APICALL void GL_APIENTRY glGetAttachedShaders (GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders);
+GL_APICALL GLint GL_APIENTRY glGetAttribLocation (GLuint program, const GLchar *name);
+GL_APICALL void GL_APIENTRY glGetBooleanv (GLenum pname, GLboolean *data);
+GL_APICALL void GL_APIENTRY glGetBufferParameteriv (GLenum target, GLenum pname, GLint *params);
+GL_APICALL GLenum GL_APIENTRY glGetError (void);
+GL_APICALL void GL_APIENTRY glGetFloatv (GLenum pname, GLfloat *data);
+GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv (GLenum target, GLenum attachment, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetIntegerv (GLenum pname, GLint *data);
+GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetProgramInfoLog (GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv (GLenum target, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetShaderiv (GLuint shader, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetShaderInfoLog (GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
+GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat (GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision);
+GL_APICALL void GL_APIENTRY glGetShaderSource (GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source);
+GL_APICALL const GLubyte *GL_APIENTRY glGetString (GLenum name);
+GL_APICALL void GL_APIENTRY glGetTexParameterfv (GLenum target, GLenum pname, GLfloat *params);
+GL_APICALL void GL_APIENTRY glGetTexParameteriv (GLenum target, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetUniformfv (GLuint program, GLint location, GLfloat *params);
+GL_APICALL void GL_APIENTRY glGetUniformiv (GLuint program, GLint location, GLint *params);
+GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar *name);
+GL_APICALL void GL_APIENTRY glGetVertexAttribfv (GLuint index, GLenum pname, GLfloat *params);
+GL_APICALL void GL_APIENTRY glGetVertexAttribiv (GLuint index, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv (GLuint index, GLenum pname, void **pointer);
+GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode);
+GL_APICALL GLboolean GL_APIENTRY glIsBuffer (GLuint buffer);
+GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap);
+GL_APICALL GLboolean GL_APIENTRY glIsFramebuffer (GLuint framebuffer);
+GL_APICALL GLboolean GL_APIENTRY glIsProgram (GLuint program);
+GL_APICALL GLboolean GL_APIENTRY glIsRenderbuffer (GLuint renderbuffer);
+GL_APICALL GLboolean GL_APIENTRY glIsShader (GLuint shader);
+GL_APICALL GLboolean GL_APIENTRY glIsTexture (GLuint texture);
+GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width);
+GL_APICALL void GL_APIENTRY glLinkProgram (GLuint program);
+GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param);
+GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units);
+GL_APICALL void GL_APIENTRY glReadPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void *pixels);
+GL_APICALL void GL_APIENTRY glReleaseShaderCompiler (void);
+GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glSampleCoverage (GLfloat value, GLboolean invert);
+GL_APICALL void GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glShaderBinary (GLsizei count, const GLuint *shaders, GLenum binaryFormat, const void *binary, GLsizei length);
+GL_APICALL void GL_APIENTRY glShaderSource (GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length);
+GL_APICALL void GL_APIENTRY glStencilFunc (GLenum func, GLint ref, GLuint mask);
+GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLint ref, GLuint mask);
+GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask);
+GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask);
+GL_APICALL void GL_APIENTRY glStencilOp (GLenum fail, GLenum zfail, GLenum zpass);
+GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
+GL_APICALL void GL_APIENTRY glTexImage2D (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
+GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param);
+GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params);
+GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param);
+GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params);
+GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels);
+GL_APICALL void GL_APIENTRY glUniform1f (GLint location, GLfloat v0);
+GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0);
+GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint *value);
+GL_APICALL void GL_APIENTRY glUniform2f (GLint location, GLfloat v0, GLfloat v1);
+GL_APICALL void GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniform2i (GLint location, GLint v0, GLint v1);
+GL_APICALL void GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const GLint *value);
+GL_APICALL void GL_APIENTRY glUniform3f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+GL_APICALL void GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniform3i (GLint location, GLint v0, GLint v1, GLint v2);
+GL_APICALL void GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const GLint *value);
+GL_APICALL void GL_APIENTRY glUniform4f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+GL_APICALL void GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniform4i (GLint location, GLint v0, GLint v1, GLint v2, GLint v3);
+GL_APICALL void GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const GLint *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUseProgram (GLuint program);
+GL_APICALL void GL_APIENTRY glValidateProgram (GLuint program);
+GL_APICALL void GL_APIENTRY glVertexAttrib1f (GLuint index, GLfloat x);
+GL_APICALL void GL_APIENTRY glVertexAttrib1fv (GLuint index, const GLfloat *v);
+GL_APICALL void GL_APIENTRY glVertexAttrib2f (GLuint index, GLfloat x, GLfloat y);
+GL_APICALL void GL_APIENTRY glVertexAttrib2fv (GLuint index, const GLfloat *v);
+GL_APICALL void GL_APIENTRY glVertexAttrib3f (GLuint index, GLfloat x, GLfloat y, GLfloat z);
+GL_APICALL void GL_APIENTRY glVertexAttrib3fv (GLuint index, const GLfloat *v);
+GL_APICALL void GL_APIENTRY glVertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v);
+GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
+GL_APICALL void GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei height);
+#endif
+#endif /* GL_ES_VERSION_2_0 */
+
+#ifndef GL_ES_VERSION_3_0
+#define GL_ES_VERSION_3_0 1
+typedef khronos_uint16_t GLhalf;
+#define GL_READ_BUFFER                    0x0C02
+#define GL_UNPACK_ROW_LENGTH              0x0CF2
+#define GL_UNPACK_SKIP_ROWS               0x0CF3
+#define GL_UNPACK_SKIP_PIXELS             0x0CF4
+#define GL_PACK_ROW_LENGTH                0x0D02
+#define GL_PACK_SKIP_ROWS                 0x0D03
+#define GL_PACK_SKIP_PIXELS               0x0D04
+#define GL_COLOR                          0x1800
+#define GL_DEPTH                          0x1801
+#define GL_STENCIL                        0x1802
+#define GL_RED                            0x1903
+#define GL_RGB8                           0x8051
+#define GL_RGBA8                          0x8058
+#define GL_RGB10_A2                       0x8059
+#define GL_TEXTURE_BINDING_3D             0x806A
+#define GL_UNPACK_SKIP_IMAGES             0x806D
+#define GL_UNPACK_IMAGE_HEIGHT            0x806E
+#define GL_TEXTURE_3D                     0x806F
+#define GL_TEXTURE_WRAP_R                 0x8072
+#define GL_MAX_3D_TEXTURE_SIZE            0x8073
+#define GL_UNSIGNED_INT_2_10_10_10_REV    0x8368
+#define GL_BGR                            0x80E0
+#define GL_BGRA                           0x80E1
+#define GL_MAX_ELEMENTS_VERTICES          0x80E8
+#define GL_MAX_ELEMENTS_INDICES           0x80E9
+#define GL_TEXTURE_MIN_LOD                0x813A
+#define GL_TEXTURE_MAX_LOD                0x813B
+#define GL_TEXTURE_BASE_LEVEL             0x813C
+#define GL_TEXTURE_MAX_LEVEL              0x813D
+#define GL_MIN                            0x8007
+#define GL_MAX                            0x8008
+#define GL_DEPTH_COMPONENT24              0x81A6
+#define GL_MAX_TEXTURE_LOD_BIAS           0x84FD
+#define GL_TEXTURE_COMPARE_MODE           0x884C
+#define GL_TEXTURE_COMPARE_FUNC           0x884D
+#define GL_CURRENT_QUERY                  0x8865
+#define GL_QUERY_RESULT                   0x8866
+#define GL_QUERY_RESULT_AVAILABLE         0x8867
+#define GL_BUFFER_MAPPED                  0x88BC
+#define GL_BUFFER_MAP_POINTER             0x88BD
+#define GL_STREAM_READ                    0x88E1
+#define GL_STREAM_COPY                    0x88E2
+#define GL_STATIC_READ                    0x88E5
+#define GL_STATIC_COPY                    0x88E6
+#define GL_DYNAMIC_READ                   0x88E9
+#define GL_DYNAMIC_COPY                   0x88EA
+#define GL_MAX_DRAW_BUFFERS               0x8824
+#define GL_DRAW_BUFFER0                   0x8825
+#define GL_DRAW_BUFFER1                   0x8826
+#define GL_DRAW_BUFFER2                   0x8827
+#define GL_DRAW_BUFFER3                   0x8828
+#define GL_DRAW_BUFFER4                   0x8829
+#define GL_DRAW_BUFFER5                   0x882A
+#define GL_DRAW_BUFFER6                   0x882B
+#define GL_DRAW_BUFFER7                   0x882C
+#define GL_DRAW_BUFFER8                   0x882D
+#define GL_DRAW_BUFFER9                   0x882E
+#define GL_DRAW_BUFFER10                  0x882F
+#define GL_DRAW_BUFFER11                  0x8830
+#define GL_DRAW_BUFFER12                  0x8831
+#define GL_DRAW_BUFFER13                  0x8832
+#define GL_DRAW_BUFFER14                  0x8833
+#define GL_DRAW_BUFFER15                  0x8834
+#define GL_MAX_FRAGMENT_UNIFORM_COMPONENTS 0x8B49
+#define GL_MAX_VERTEX_UNIFORM_COMPONENTS  0x8B4A
+#define GL_SAMPLER_3D                     0x8B5F
+#define GL_SAMPLER_2D_SHADOW              0x8B62
+#define GL_FRAGMENT_SHADER_DERIVATIVE_HINT 0x8B8B
+#define GL_PIXEL_PACK_BUFFER              0x88EB
+#define GL_PIXEL_UNPACK_BUFFER            0x88EC
+#define GL_PIXEL_PACK_BUFFER_BINDING      0x88ED
+#define GL_PIXEL_UNPACK_BUFFER_BINDING    0x88EF
+#define GL_FLOAT_MAT2x3                   0x8B65
+#define GL_FLOAT_MAT2x4                   0x8B66
+#define GL_FLOAT_MAT3x2                   0x8B67
+#define GL_FLOAT_MAT3x4                   0x8B68
+#define GL_FLOAT_MAT4x2                   0x8B69
+#define GL_FLOAT_MAT4x3                   0x8B6A
+#define GL_SRGB                           0x8C40
+#define GL_SRGB8                          0x8C41
+#define GL_SRGB8_ALPHA8                   0x8C43
+#define GL_COMPARE_REF_TO_TEXTURE         0x884E
+#define GL_MAJOR_VERSION                  0x821B
+#define GL_MINOR_VERSION                  0x821C
+#define GL_NUM_EXTENSIONS                 0x821D
+#define GL_RGBA32F                        0x8814
+#define GL_RGB32F                         0x8815
+#define GL_RGBA16F                        0x881A
+#define GL_RGB16F                         0x881B
+#define GL_VERTEX_ATTRIB_ARRAY_INTEGER    0x88FD
+#define GL_MAX_ARRAY_TEXTURE_LAYERS       0x88FF
+#define GL_MIN_PROGRAM_TEXEL_OFFSET       0x8904
+#define GL_MAX_PROGRAM_TEXEL_OFFSET       0x8905
+#define GL_MAX_VARYING_COMPONENTS         0x8B4B
+#define GL_TEXTURE_2D_ARRAY               0x8C1A
+#define GL_TEXTURE_BINDING_2D_ARRAY       0x8C1D
+#define GL_R11F_G11F_B10F                 0x8C3A
+#define GL_UNSIGNED_INT_10F_11F_11F_REV   0x8C3B
+#define GL_RGB9_E5                        0x8C3D
+#define GL_UNSIGNED_INT_5_9_9_9_REV       0x8C3E
+#define GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH 0x8C76
+#define GL_TRANSFORM_FEEDBACK_BUFFER_MODE 0x8C7F
+#define GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS 0x8C80
+#define GL_TRANSFORM_FEEDBACK_VARYINGS    0x8C83
+#define GL_TRANSFORM_FEEDBACK_BUFFER_START 0x8C84
+#define GL_TRANSFORM_FEEDBACK_BUFFER_SIZE 0x8C85
+#define GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN 0x8C88
+#define GL_RASTERIZER_DISCARD             0x8C89
+#define GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS 0x8C8A
+#define GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS 0x8C8B
+#define GL_INTERLEAVED_ATTRIBS            0x8C8C
+#define GL_SEPARATE_ATTRIBS               0x8C8D
+#define GL_TRANSFORM_FEEDBACK_BUFFER      0x8C8E
+#define GL_TRANSFORM_FEEDBACK_BUFFER_BINDING 0x8C8F
+#define GL_RGBA32UI                       0x8D70
+#define GL_RGB32UI                        0x8D71
+#define GL_RGBA16UI                       0x8D76
+#define GL_RGB16UI                        0x8D77
+#define GL_RGBA8UI                        0x8D7C
+#define GL_RGB8UI                         0x8D7D
+#define GL_RGBA32I                        0x8D82
+#define GL_RGB32I                         0x8D83
+#define GL_RGBA16I                        0x8D88
+#define GL_RGB16I                         0x8D89
+#define GL_RGBA8I                         0x8D8E
+#define GL_RGB8I                          0x8D8F
+#define GL_RED_INTEGER                    0x8D94
+#define GL_RGB_INTEGER                    0x8D98
+#define GL_RGBA_INTEGER                   0x8D99
+#define GL_SAMPLER_2D_ARRAY               0x8DC1
+#define GL_SAMPLER_2D_ARRAY_SHADOW        0x8DC4
+#define GL_SAMPLER_CUBE_SHADOW            0x8DC5
+#define GL_UNSIGNED_INT_VEC2              0x8DC6
+#define GL_UNSIGNED_INT_VEC3              0x8DC7
+#define GL_UNSIGNED_INT_VEC4              0x8DC8
+#define GL_INT_SAMPLER_2D                 0x8DCA
+#define GL_INT_SAMPLER_3D                 0x8DCB
+#define GL_INT_SAMPLER_CUBE               0x8DCC
+#define GL_INT_SAMPLER_2D_ARRAY           0x8DCF
+#define GL_UNSIGNED_INT_SAMPLER_2D        0x8DD2
+#define GL_UNSIGNED_INT_SAMPLER_3D        0x8DD3
+#define GL_UNSIGNED_INT_SAMPLER_CUBE      0x8DD4
+#define GL_UNSIGNED_INT_SAMPLER_2D_ARRAY  0x8DD7
+#define GL_BUFFER_ACCESS_FLAGS            0x911F
+#define GL_BUFFER_MAP_LENGTH              0x9120
+#define GL_BUFFER_MAP_OFFSET              0x9121
+#define GL_DEPTH_COMPONENT32F             0x8CAC
+#define GL_DEPTH32F_STENCIL8              0x8CAD
+#define GL_FLOAT_32_UNSIGNED_INT_24_8_REV 0x8DAD
+#define GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING 0x8210
+#define GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE 0x8211
+#define GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE 0x8212
+#define GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE 0x8213
+#define GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE 0x8214
+#define GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE 0x8215
+#define GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE 0x8216
+#define GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE 0x8217
+#define GL_FRAMEBUFFER_DEFAULT            0x8218
+#define GL_FRAMEBUFFER_UNDEFINED          0x8219
+#define GL_DEPTH_STENCIL_ATTACHMENT       0x821A
+#define GL_DEPTH_STENCIL                  0x84F9
+#define GL_UNSIGNED_INT_24_8              0x84FA
+#define GL_DEPTH24_STENCIL8               0x88F0
+#define GL_UNSIGNED_NORMALIZED            0x8C17
+#define GL_DRAW_FRAMEBUFFER_BINDING       0x8CA6
+#define GL_READ_FRAMEBUFFER               0x8CA8
+#define GL_DRAW_FRAMEBUFFER               0x8CA9
+#define GL_READ_FRAMEBUFFER_BINDING       0x8CAA
+#define GL_RENDERBUFFER_SAMPLES           0x8CAB
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER 0x8CD4
+#define GL_MAX_COLOR_ATTACHMENTS          0x8CDF
+#define GL_COLOR_ATTACHMENT1              0x8CE1
+#define GL_COLOR_ATTACHMENT2              0x8CE2
+#define GL_COLOR_ATTACHMENT3              0x8CE3
+#define GL_COLOR_ATTACHMENT4              0x8CE4
+#define GL_COLOR_ATTACHMENT5              0x8CE5
+#define GL_COLOR_ATTACHMENT6              0x8CE6
+#define GL_COLOR_ATTACHMENT7              0x8CE7
+#define GL_COLOR_ATTACHMENT8              0x8CE8
+#define GL_COLOR_ATTACHMENT9              0x8CE9
+#define GL_COLOR_ATTACHMENT10             0x8CEA
+#define GL_COLOR_ATTACHMENT11             0x8CEB
+#define GL_COLOR_ATTACHMENT12             0x8CEC
+#define GL_COLOR_ATTACHMENT13             0x8CED
+#define GL_COLOR_ATTACHMENT14             0x8CEE
+#define GL_COLOR_ATTACHMENT15             0x8CEF
+#define GL_COLOR_ATTACHMENT16             0x8CF0
+#define GL_COLOR_ATTACHMENT17             0x8CF1
+#define GL_COLOR_ATTACHMENT18             0x8CF2
+#define GL_COLOR_ATTACHMENT19             0x8CF3
+#define GL_COLOR_ATTACHMENT20             0x8CF4
+#define GL_COLOR_ATTACHMENT21             0x8CF5
+#define GL_COLOR_ATTACHMENT22             0x8CF6
+#define GL_COLOR_ATTACHMENT23             0x8CF7
+#define GL_COLOR_ATTACHMENT24             0x8CF8
+#define GL_COLOR_ATTACHMENT25             0x8CF9
+#define GL_COLOR_ATTACHMENT26             0x8CFA
+#define GL_COLOR_ATTACHMENT27             0x8CFB
+#define GL_COLOR_ATTACHMENT28             0x8CFC
+#define GL_COLOR_ATTACHMENT29             0x8CFD
+#define GL_COLOR_ATTACHMENT30             0x8CFE
+#define GL_COLOR_ATTACHMENT31             0x8CFF
+#define GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE 0x8D56
+#define GL_MAX_SAMPLES                    0x8D57
+#define GL_HALF_FLOAT                     0x140B
+#define GL_MAP_READ_BIT                   0x0001
+#define GL_MAP_WRITE_BIT                  0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT       0x0004
+#define GL_MAP_INVALIDATE_BUFFER_BIT      0x0008
+#define GL_MAP_FLUSH_EXPLICIT_BIT         0x0010
+#define GL_MAP_UNSYNCHRONIZED_BIT         0x0020
+#define GL_RG                             0x8227
+#define GL_RG_INTEGER                     0x8228
+#define GL_R8                             0x8229
+#define GL_RG8                            0x822B
+#define GL_R16F                           0x822D
+#define GL_R32F                           0x822E
+#define GL_RG16F                          0x822F
+#define GL_RG32F                          0x8230
+#define GL_R8I                            0x8231
+#define GL_R8UI                           0x8232
+#define GL_R16I                           0x8233
+#define GL_R16UI                          0x8234
+#define GL_R32I                           0x8235
+#define GL_R32UI                          0x8236
+#define GL_RG8I                           0x8237
+#define GL_RG8UI                          0x8238
+#define GL_RG16I                          0x8239
+#define GL_RG16UI                         0x823A
+#define GL_RG32I                          0x823B
+#define GL_RG32UI                         0x823C
+#define GL_VERTEX_ARRAY_BINDING           0x85B5
+#define GL_R8_SNORM                       0x8F94
+#define GL_RG8_SNORM                      0x8F95
+#define GL_RGB8_SNORM                     0x8F96
+#define GL_RGBA8_SNORM                    0x8F97
+#define GL_SIGNED_NORMALIZED              0x8F9C
+#define GL_PRIMITIVE_RESTART_FIXED_INDEX  0x8D69
+#define GL_COPY_READ_BUFFER               0x8F36
+#define GL_COPY_WRITE_BUFFER              0x8F37
+#define GL_COPY_READ_BUFFER_BINDING       0x8F36
+#define GL_COPY_WRITE_BUFFER_BINDING      0x8F37
+#define GL_UNIFORM_BUFFER                 0x8A11
+#define GL_UNIFORM_BUFFER_BINDING         0x8A28
+#define GL_UNIFORM_BUFFER_START           0x8A29
+#define GL_UNIFORM_BUFFER_SIZE            0x8A2A
+#define GL_MAX_VERTEX_UNIFORM_BLOCKS      0x8A2B
+#define GL_MAX_FRAGMENT_UNIFORM_BLOCKS    0x8A2D
+#define GL_MAX_COMBINED_UNIFORM_BLOCKS    0x8A2E
+#define GL_MAX_UNIFORM_BUFFER_BINDINGS    0x8A2F
+#define GL_MAX_UNIFORM_BLOCK_SIZE         0x8A30
+#define GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS 0x8A31
+#define GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS 0x8A33
+#define GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT 0x8A34
+#define GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH 0x8A35
+#define GL_ACTIVE_UNIFORM_BLOCKS          0x8A36
+#define GL_UNIFORM_TYPE                   0x8A37
+#define GL_UNIFORM_SIZE                   0x8A38
+#define GL_UNIFORM_NAME_LENGTH            0x8A39
+#define GL_UNIFORM_BLOCK_INDEX            0x8A3A
+#define GL_UNIFORM_OFFSET                 0x8A3B
+#define GL_UNIFORM_ARRAY_STRIDE           0x8A3C
+#define GL_UNIFORM_MATRIX_STRIDE          0x8A3D
+#define GL_UNIFORM_IS_ROW_MAJOR           0x8A3E
+#define GL_UNIFORM_BLOCK_BINDING          0x8A3F
+#define GL_UNIFORM_BLOCK_DATA_SIZE        0x8A40
+#define GL_UNIFORM_BLOCK_NAME_LENGTH      0x8A41
+#define GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS  0x8A42
+#define GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES 0x8A43
+#define GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER 0x8A44
+#define GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER 0x8A46
+#define GL_INVALID_INDEX                  0xFFFFFFFFu
+#define GL_MAX_VERTEX_OUTPUT_COMPONENTS   0x9122
+#define GL_MAX_FRAGMENT_INPUT_COMPONENTS  0x9125
+#define GL_MAX_SERVER_WAIT_TIMEOUT        0x9111
+#define GL_OBJECT_TYPE                    0x9112
+#define GL_SYNC_CONDITION                 0x9113
+#define GL_SYNC_STATUS                    0x9114
+#define GL_SYNC_FLAGS                     0x9115
+#define GL_SYNC_FENCE                     0x9116
+#define GL_SYNC_GPU_COMMANDS_COMPLETE     0x9117
+#define GL_UNSIGNALED                     0x9118
+#define GL_SIGNALED                       0x9119
+#define GL_ALREADY_SIGNALED               0x911A
+#define GL_TIMEOUT_EXPIRED                0x911B
+#define GL_CONDITION_SATISFIED            0x911C
+#define GL_WAIT_FAILED                    0x911D
+#define GL_SYNC_FLUSH_COMMANDS_BIT        0x00000001
+#define GL_TIMEOUT_IGNORED                0xFFFFFFFFFFFFFFFFull
+#define GL_VERTEX_ATTRIB_ARRAY_DIVISOR    0x88FE
+#define GL_ANY_SAMPLES_PASSED             0x8C2F
+#define GL_ANY_SAMPLES_PASSED_CONSERVATIVE 0x8D6A
+#define GL_SAMPLER_BINDING                0x8919
+#define GL_RGB10_A2UI                     0x906F
+#define GL_TEXTURE_SWIZZLE_R              0x8E42
+#define GL_TEXTURE_SWIZZLE_G              0x8E43
+#define GL_TEXTURE_SWIZZLE_B              0x8E44
+#define GL_TEXTURE_SWIZZLE_A              0x8E45
+#define GL_GREEN                          0x1904
+#define GL_BLUE                           0x1905
+#define GL_INT_2_10_10_10_REV             0x8D9F
+#define GL_TRANSFORM_FEEDBACK             0x8E22
+#define GL_TRANSFORM_FEEDBACK_PAUSED      0x8E23
+#define GL_TRANSFORM_FEEDBACK_ACTIVE      0x8E24
+#define GL_TRANSFORM_FEEDBACK_BINDING     0x8E25
+#define GL_PROGRAM_BINARY_RETRIEVABLE_HINT 0x8257
+#define GL_PROGRAM_BINARY_LENGTH          0x8741
+#define GL_NUM_PROGRAM_BINARY_FORMATS     0x87FE
+#define GL_PROGRAM_BINARY_FORMATS         0x87FF
+#define GL_COMPRESSED_R11_EAC             0x9270
+#define GL_COMPRESSED_SIGNED_R11_EAC      0x9271
+#define GL_COMPRESSED_RG11_EAC            0x9272
+#define GL_COMPRESSED_SIGNED_RG11_EAC     0x9273
+#define GL_COMPRESSED_RGB8_ETC2           0x9274
+#define GL_COMPRESSED_SRGB8_ETC2          0x9275
+#define GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 0x9276
+#define GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2 0x9277
+#define GL_COMPRESSED_RGBA8_ETC2_EAC      0x9278
+#define GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC 0x9279
+#define GL_TEXTURE_IMMUTABLE_FORMAT       0x912F
+#define GL_MAX_ELEMENT_INDEX              0x8D6B
+#define GL_NUM_SAMPLE_COUNTS              0x9380
+#define GL_TEXTURE_IMMUTABLE_LEVELS       0x82DF
+typedef void (GL_APIENTRYP PFNGLREADBUFFERPROC) (GLenum src);
+typedef void (GL_APIENTRYP PFNGLDRAWRANGEELEMENTSPROC) (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices);
+typedef void (GL_APIENTRYP PFNGLTEXIMAGE3DPROC) (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const void *pixels);
+typedef void (GL_APIENTRYP PFNGLTEXSUBIMAGE3DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels);
+typedef void (GL_APIENTRYP PFNGLCOPYTEXSUBIMAGE3DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLCOMPRESSEDTEXIMAGE3DPROC) (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
+typedef void (GL_APIENTRYP PFNGLCOMPRESSEDTEXSUBIMAGE3DPROC) (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data);
+typedef void (GL_APIENTRYP PFNGLGENQUERIESPROC) (GLsizei n, GLuint *ids);
+typedef void (GL_APIENTRYP PFNGLDELETEQUERIESPROC) (GLsizei n, const GLuint *ids);
+typedef GLboolean (GL_APIENTRYP PFNGLISQUERYPROC) (GLuint id);
+typedef void (GL_APIENTRYP PFNGLBEGINQUERYPROC) (GLenum target, GLuint id);
+typedef void (GL_APIENTRYP PFNGLENDQUERYPROC) (GLenum target);
+typedef void (GL_APIENTRYP PFNGLGETQUERYIVPROC) (GLenum target, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETQUERYOBJECTUIVPROC) (GLuint id, GLenum pname, GLuint *params);
+typedef GLboolean (GL_APIENTRYP PFNGLUNMAPBUFFERPROC) (GLenum target);
+typedef void (GL_APIENTRYP PFNGLGETBUFFERPOINTERVPROC) (GLenum target, GLenum pname, void **params);
+typedef void (GL_APIENTRYP PFNGLDRAWBUFFERSPROC) (GLsizei n, const GLenum *bufs);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX2X3FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX3X2FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX2X4FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX4X2FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX3X4FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORMMATRIX4X3FVPROC) (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLBLITFRAMEBUFFERPROC) (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
+typedef void (GL_APIENTRYP PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC) (GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLFRAMEBUFFERTEXTURELAYERPROC) (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer);
+typedef void *(GL_APIENTRYP PFNGLMAPBUFFERRANGEPROC) (GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+typedef void (GL_APIENTRYP PFNGLFLUSHMAPPEDBUFFERRANGEPROC) (GLenum target, GLintptr offset, GLsizeiptr length);
+typedef void (GL_APIENTRYP PFNGLBINDVERTEXARRAYPROC) (GLuint array);
+typedef void (GL_APIENTRYP PFNGLDELETEVERTEXARRAYSPROC) (GLsizei n, const GLuint *arrays);
+typedef void (GL_APIENTRYP PFNGLGENVERTEXARRAYSPROC) (GLsizei n, GLuint *arrays);
+typedef GLboolean (GL_APIENTRYP PFNGLISVERTEXARRAYPROC) (GLuint array);
+typedef void (GL_APIENTRYP PFNGLGETINTEGERI_VPROC) (GLenum target, GLuint index, GLint *data);
+typedef void (GL_APIENTRYP PFNGLBEGINTRANSFORMFEEDBACKPROC) (GLenum primitiveMode);
+typedef void (GL_APIENTRYP PFNGLENDTRANSFORMFEEDBACKPROC) (void);
+typedef void (GL_APIENTRYP PFNGLBINDBUFFERRANGEPROC) (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
+typedef void (GL_APIENTRYP PFNGLBINDBUFFERBASEPROC) (GLenum target, GLuint index, GLuint buffer);
+typedef void (GL_APIENTRYP PFNGLTRANSFORMFEEDBACKVARYINGSPROC) (GLuint program, GLsizei count, const GLchar *const*varyings, GLenum bufferMode);
+typedef void (GL_APIENTRYP PFNGLGETTRANSFORMFEEDBACKVARYINGPROC) (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBIPOINTERPROC) (GLuint index, GLint size, GLenum type, GLsizei stride, const void *pointer);
+typedef void (GL_APIENTRYP PFNGLGETVERTEXATTRIBIIVPROC) (GLuint index, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETVERTEXATTRIBIUIVPROC) (GLuint index, GLenum pname, GLuint *params);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBI4IPROC) (GLuint index, GLint x, GLint y, GLint z, GLint w);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBI4UIPROC) (GLuint index, GLuint x, GLuint y, GLuint z, GLuint w);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBI4IVPROC) (GLuint index, const GLint *v);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBI4UIVPROC) (GLuint index, const GLuint *v);
+typedef void (GL_APIENTRYP PFNGLGETUNIFORMUIVPROC) (GLuint program, GLint location, GLuint *params);
+typedef GLint (GL_APIENTRYP PFNGLGETFRAGDATALOCATIONPROC) (GLuint program, const GLchar *name);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1UIPROC) (GLint location, GLuint v0);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2UIPROC) (GLint location, GLuint v0, GLuint v1);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3UIPROC) (GLint location, GLuint v0, GLuint v1, GLuint v2);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4UIPROC) (GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3);
+typedef void (GL_APIENTRYP PFNGLUNIFORM1UIVPROC) (GLint location, GLsizei count, const GLuint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM2UIVPROC) (GLint location, GLsizei count, const GLuint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM3UIVPROC) (GLint location, GLsizei count, const GLuint *value);
+typedef void (GL_APIENTRYP PFNGLUNIFORM4UIVPROC) (GLint location, GLsizei count, const GLuint *value);
+typedef void (GL_APIENTRYP PFNGLCLEARBUFFERIVPROC) (GLenum buffer, GLint drawbuffer, const GLint *value);
+typedef void (GL_APIENTRYP PFNGLCLEARBUFFERUIVPROC) (GLenum buffer, GLint drawbuffer, const GLuint *value);
+typedef void (GL_APIENTRYP PFNGLCLEARBUFFERFVPROC) (GLenum buffer, GLint drawbuffer, const GLfloat *value);
+typedef void (GL_APIENTRYP PFNGLCLEARBUFFERFIPROC) (GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil);
+typedef const GLubyte *(GL_APIENTRYP PFNGLGETSTRINGIPROC) (GLenum name, GLuint index);
+typedef void (GL_APIENTRYP PFNGLCOPYBUFFERSUBDATAPROC) (GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size);
+typedef void (GL_APIENTRYP PFNGLGETUNIFORMINDICESPROC) (GLuint program, GLsizei uniformCount, const GLchar *const*uniformNames, GLuint *uniformIndices);
+typedef void (GL_APIENTRYP PFNGLGETACTIVEUNIFORMSIVPROC) (GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params);
+typedef GLuint (GL_APIENTRYP PFNGLGETUNIFORMBLOCKINDEXPROC) (GLuint program, const GLchar *uniformBlockName);
+typedef void (GL_APIENTRYP PFNGLGETACTIVEUNIFORMBLOCKIVPROC) (GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETACTIVEUNIFORMBLOCKNAMEPROC) (GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName);
+typedef void (GL_APIENTRYP PFNGLUNIFORMBLOCKBINDINGPROC) (GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding);
+typedef void (GL_APIENTRYP PFNGLDRAWARRAYSINSTANCEDPROC) (GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
+typedef void (GL_APIENTRYP PFNGLDRAWELEMENTSINSTANCEDPROC) (GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount);
+typedef GLsync (GL_APIENTRYP PFNGLFENCESYNCPROC) (GLenum condition, GLbitfield flags);
+typedef GLboolean (GL_APIENTRYP PFNGLISSYNCPROC) (GLsync sync);
+typedef void (GL_APIENTRYP PFNGLDELETESYNCPROC) (GLsync sync);
+typedef GLenum (GL_APIENTRYP PFNGLCLIENTWAITSYNCPROC) (GLsync sync, GLbitfield flags, GLuint64 timeout);
+typedef void (GL_APIENTRYP PFNGLWAITSYNCPROC) (GLsync sync, GLbitfield flags, GLuint64 timeout);
+typedef void (GL_APIENTRYP PFNGLGETINTEGER64VPROC) (GLenum pname, GLint64 *data);
+typedef void (GL_APIENTRYP PFNGLGETSYNCIVPROC) (GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values);
+typedef void (GL_APIENTRYP PFNGLGETINTEGER64I_VPROC) (GLenum target, GLuint index, GLint64 *data);
+typedef void (GL_APIENTRYP PFNGLGETBUFFERPARAMETERI64VPROC) (GLenum target, GLenum pname, GLint64 *params);
+typedef void (GL_APIENTRYP PFNGLGENSAMPLERSPROC) (GLsizei count, GLuint *samplers);
+typedef void (GL_APIENTRYP PFNGLDELETESAMPLERSPROC) (GLsizei count, const GLuint *samplers);
+typedef GLboolean (GL_APIENTRYP PFNGLISSAMPLERPROC) (GLuint sampler);
+typedef void (GL_APIENTRYP PFNGLBINDSAMPLERPROC) (GLuint unit, GLuint sampler);
+typedef void (GL_APIENTRYP PFNGLSAMPLERPARAMETERIPROC) (GLuint sampler, GLenum pname, GLint param);
+typedef void (GL_APIENTRYP PFNGLSAMPLERPARAMETERIVPROC) (GLuint sampler, GLenum pname, const GLint *param);
+typedef void (GL_APIENTRYP PFNGLSAMPLERPARAMETERFPROC) (GLuint sampler, GLenum pname, GLfloat param);
+typedef void (GL_APIENTRYP PFNGLSAMPLERPARAMETERFVPROC) (GLuint sampler, GLenum pname, const GLfloat *param);
+typedef void (GL_APIENTRYP PFNGLGETSAMPLERPARAMETERIVPROC) (GLuint sampler, GLenum pname, GLint *params);
+typedef void (GL_APIENTRYP PFNGLGETSAMPLERPARAMETERFVPROC) (GLuint sampler, GLenum pname, GLfloat *params);
+typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBDIVISORPROC) (GLuint index, GLuint divisor);
+typedef void (GL_APIENTRYP PFNGLBINDTRANSFORMFEEDBACKPROC) (GLenum target, GLuint id);
+typedef void (GL_APIENTRYP PFNGLDELETETRANSFORMFEEDBACKSPROC) (GLsizei n, const GLuint *ids);
+typedef void (GL_APIENTRYP PFNGLGENTRANSFORMFEEDBACKSPROC) (GLsizei n, GLuint *ids);
+typedef GLboolean (GL_APIENTRYP PFNGLISTRANSFORMFEEDBACKPROC) (GLuint id);
+typedef void (GL_APIENTRYP PFNGLPAUSETRANSFORMFEEDBACKPROC) (void);
+typedef void (GL_APIENTRYP PFNGLRESUMETRANSFORMFEEDBACKPROC) (void);
+typedef void (GL_APIENTRYP PFNGLGETPROGRAMBINARYPROC) (GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, void *binary);
+typedef void (GL_APIENTRYP PFNGLPROGRAMBINARYPROC) (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length);
+typedef void (GL_APIENTRYP PFNGLPROGRAMPARAMETERIPROC) (GLuint program, GLenum pname, GLint value);
+typedef void (GL_APIENTRYP PFNGLINVALIDATEFRAMEBUFFERPROC) (GLenum target, GLsizei numAttachments, const GLenum *attachments);
+typedef void (GL_APIENTRYP PFNGLINVALIDATESUBFRAMEBUFFERPROC) (GLenum target, GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLTEXSTORAGE2DPROC) (GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height);
+typedef void (GL_APIENTRYP PFNGLTEXSTORAGE3DPROC) (GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth);
+typedef void (GL_APIENTRYP PFNGLGETINTERNALFORMATIVPROC) (GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params);
+#if GL_GLES_PROTOTYPES
+GL_APICALL void GL_APIENTRY glReadBuffer (GLenum src);
+GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices);
+GL_APICALL void GL_APIENTRY glTexImage3D (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const void *pixels);
+GL_APICALL void GL_APIENTRY glTexSubImage3D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels);
+GL_APICALL void GL_APIENTRY glCopyTexSubImage3D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glCompressedTexImage3D (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
+GL_APICALL void GL_APIENTRY glCompressedTexSubImage3D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data);
+GL_APICALL void GL_APIENTRY glGenQueries (GLsizei n, GLuint *ids);
+GL_APICALL void GL_APIENTRY glDeleteQueries (GLsizei n, const GLuint *ids);
+GL_APICALL GLboolean GL_APIENTRY glIsQuery (GLuint id);
+GL_APICALL void GL_APIENTRY glBeginQuery (GLenum target, GLuint id);
+GL_APICALL void GL_APIENTRY glEndQuery (GLenum target);
+GL_APICALL void GL_APIENTRY glGetQueryiv (GLenum target, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetQueryObjectuiv (GLuint id, GLenum pname, GLuint *params);
+GL_APICALL GLboolean GL_APIENTRY glUnmapBuffer (GLenum target);
+GL_APICALL void GL_APIENTRY glGetBufferPointerv (GLenum target, GLenum pname, void **params);
+GL_APICALL void GL_APIENTRY glDrawBuffers (GLsizei n, const GLenum *bufs);
+GL_APICALL void GL_APIENTRY glUniformMatrix2x3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix3x2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix2x4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix4x2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix3x4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glUniformMatrix4x3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glBlitFramebuffer (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample (GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glFramebufferTextureLayer (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer);
+GL_APICALL void *GL_APIENTRY glMapBufferRange (GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+GL_APICALL void GL_APIENTRY glFlushMappedBufferRange (GLenum target, GLintptr offset, GLsizeiptr length);
+GL_APICALL void GL_APIENTRY glBindVertexArray (GLuint array);
+GL_APICALL void GL_APIENTRY glDeleteVertexArrays (GLsizei n, const GLuint *arrays);
+GL_APICALL void GL_APIENTRY glGenVertexArrays (GLsizei n, GLuint *arrays);
+GL_APICALL GLboolean GL_APIENTRY glIsVertexArray (GLuint array);
+GL_APICALL void GL_APIENTRY glGetIntegeri_v (GLenum target, GLuint index, GLint *data);
+GL_APICALL void GL_APIENTRY glBeginTransformFeedback (GLenum primitiveMode);
+GL_APICALL void GL_APIENTRY glEndTransformFeedback (void);
+GL_APICALL void GL_APIENTRY glBindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
+GL_APICALL void GL_APIENTRY glBindBufferBase (GLenum target, GLuint index, GLuint buffer);
+GL_APICALL void GL_APIENTRY glTransformFeedbackVaryings (GLuint program, GLsizei count, const GLchar *const*varyings, GLenum bufferMode);
+GL_APICALL void GL_APIENTRY glGetTransformFeedbackVarying (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name);
+GL_APICALL void GL_APIENTRY glVertexAttribIPointer (GLuint index, GLint size, GLenum type, GLsizei stride, const void *pointer);
+GL_APICALL void GL_APIENTRY glGetVertexAttribIiv (GLuint index, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetVertexAttribIuiv (GLuint index, GLenum pname, GLuint *params);
+GL_APICALL void GL_APIENTRY glVertexAttribI4i (GLuint index, GLint x, GLint y, GLint z, GLint w);
+GL_APICALL void GL_APIENTRY glVertexAttribI4ui (GLuint index, GLuint x, GLuint y, GLuint z, GLuint w);
+GL_APICALL void GL_APIENTRY glVertexAttribI4iv (GLuint index, const GLint *v);
+GL_APICALL void GL_APIENTRY glVertexAttribI4uiv (GLuint index, const GLuint *v);
+GL_APICALL void GL_APIENTRY glGetUniformuiv (GLuint program, GLint location, GLuint *params);
+GL_APICALL GLint GL_APIENTRY glGetFragDataLocation (GLuint program, const GLchar *name);
+GL_APICALL void GL_APIENTRY glUniform1ui (GLint location, GLuint v0);
+GL_APICALL void GL_APIENTRY glUniform2ui (GLint location, GLuint v0, GLuint v1);
+GL_APICALL void GL_APIENTRY glUniform3ui (GLint location, GLuint v0, GLuint v1, GLuint v2);
+GL_APICALL void GL_APIENTRY glUniform4ui (GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3);
+GL_APICALL void GL_APIENTRY glUniform1uiv (GLint location, GLsizei count, const GLuint *value);
+GL_APICALL void GL_APIENTRY glUniform2uiv (GLint location, GLsizei count, const GLuint *value);
+GL_APICALL void GL_APIENTRY glUniform3uiv (GLint location, GLsizei count, const GLuint *value);
+GL_APICALL void GL_APIENTRY glUniform4uiv (GLint location, GLsizei count, const GLuint *value);
+GL_APICALL void GL_APIENTRY glClearBufferiv (GLenum buffer, GLint drawbuffer, const GLint *value);
+GL_APICALL void GL_APIENTRY glClearBufferuiv (GLenum buffer, GLint drawbuffer, const GLuint *value);
+GL_APICALL void GL_APIENTRY glClearBufferfv (GLenum buffer, GLint drawbuffer, const GLfloat *value);
+GL_APICALL void GL_APIENTRY glClearBufferfi (GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil);
+GL_APICALL const GLubyte *GL_APIENTRY glGetStringi (GLenum name, GLuint index);
+GL_APICALL void GL_APIENTRY glCopyBufferSubData (GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size);
+GL_APICALL void GL_APIENTRY glGetUniformIndices (GLuint program, GLsizei uniformCount, const GLchar *const*uniformNames, GLuint *uniformIndices);
+GL_APICALL void GL_APIENTRY glGetActiveUniformsiv (GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params);
+GL_APICALL GLuint GL_APIENTRY glGetUniformBlockIndex (GLuint program, const GLchar *uniformBlockName);
+GL_APICALL void GL_APIENTRY glGetActiveUniformBlockiv (GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetActiveUniformBlockName (GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName);
+GL_APICALL void GL_APIENTRY glUniformBlockBinding (GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding);
+GL_APICALL void GL_APIENTRY glDrawArraysInstanced (GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
+GL_APICALL void GL_APIENTRY glDrawElementsInstanced (GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount);
+GL_APICALL GLsync GL_APIENTRY glFenceSync (GLenum condition, GLbitfield flags);
+GL_APICALL GLboolean GL_APIENTRY glIsSync (GLsync sync);
+GL_APICALL void GL_APIENTRY glDeleteSync (GLsync sync);
+GL_APICALL GLenum GL_APIENTRY glClientWaitSync (GLsync sync, GLbitfield flags, GLuint64 timeout);
+GL_APICALL void GL_APIENTRY glWaitSync (GLsync sync, GLbitfield flags, GLuint64 timeout);
+GL_APICALL void GL_APIENTRY glGetInteger64v (GLenum pname, GLint64 *data);
+GL_APICALL void GL_APIENTRY glGetSynciv (GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values);
+GL_APICALL void GL_APIENTRY glGetInteger64i_v (GLenum target, GLuint index, GLint64 *data);
+GL_APICALL void GL_APIENTRY glGetBufferParameteri64v (GLenum target, GLenum pname, GLint64 *params);
+GL_APICALL void GL_APIENTRY glGenSamplers (GLsizei count, GLuint *samplers);
+GL_APICALL void GL_APIENTRY glDeleteSamplers (GLsizei count, const GLuint *samplers);
+GL_APICALL GLboolean GL_APIENTRY glIsSampler (GLuint sampler);
+GL_APICALL void GL_APIENTRY glBindSampler (GLuint unit, GLuint sampler);
+GL_APICALL void GL_APIENTRY glSamplerParameteri (GLuint sampler, GLenum pname, GLint param);
+GL_APICALL void GL_APIENTRY glSamplerParameteriv (GLuint sampler, GLenum pname, const GLint *param);
+GL_APICALL void GL_APIENTRY glSamplerParameterf (GLuint sampler, GLenum pname, GLfloat param);
+GL_APICALL void GL_APIENTRY glSamplerParameterfv (GLuint sampler, GLenum pname, const GLfloat *param);
+GL_APICALL void GL_APIENTRY glGetSamplerParameteriv (GLuint sampler, GLenum pname, GLint *params);
+GL_APICALL void GL_APIENTRY glGetSamplerParameterfv (GLuint sampler, GLenum pname, GLfloat *params);
+GL_APICALL void GL_APIENTRY glVertexAttribDivisor (GLuint index, GLuint divisor);
+GL_APICALL void GL_APIENTRY glBindTransformFeedback (GLenum target, GLuint id);
+GL_APICALL void GL_APIENTRY glDeleteTransformFeedbacks (GLsizei n, const GLuint *ids);
+GL_APICALL void GL_APIENTRY glGenTransformFeedbacks (GLsizei n, GLuint *ids);
+GL_APICALL GLboolean GL_APIENTRY glIsTransformFeedback (GLuint id);
+GL_APICALL void GL_APIENTRY glPauseTransformFeedback (void);
+GL_APICALL void GL_APIENTRY glResumeTransformFeedback (void);
+GL_APICALL void GL_APIENTRY glGetProgramBinary (GLuint program, GLsizei bufSize, GLsizei *length, GLenum *binaryFormat, void *binary);
+GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length);
+GL_APICALL void GL_APIENTRY glProgramParameteri (GLuint program, GLenum pname, GLint value);
+GL_APICALL void GL_APIENTRY glInvalidateFramebuffer (GLenum target, GLsizei numAttachments, const GLenum *attachments);
+GL_APICALL void GL_APIENTRY glInvalidateSubFramebuffer (GLenum target, GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height);
+GL_APICALL void GL_APIENTRY glTexStorage3D (GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth);
+GL_APICALL void GL_APIENTRY glGetInternalformativ (GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params);
+#endif
+#endif /* GL_ES_VERSION_3_0 */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+#endif /* OS_BROWSER */
+
+#ifdef OS_BROWSER
+/*
+ * Copyright 2012 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#ifndef EMSCRIPTEN_H
+#define EMSCRIPTEN_H
+
+/**
+ * This file contains a few useful things for compiling C/C++ code
+ * with Emscripten.
+ *
+ * Documentation for the public APIs defined in this file must be updated in: 
+ *    site/source/docs/api_reference/emscripten.h.rst
+ * A prebuilt local version of the documentation is available at: 
+ *    site/build/text/docs/api_reference/emscripten.h.txt
+ * You can also build docs locally as HTML or other formats in site/
+ * An online HTML version (which may be of a different version of Emscripten)
+ *    is up at http://kripken.github.io/emscripten-site/docs/api_reference/emscripten.h.html
+ */
+
+/*
+ * Copyright 2017 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
+// You can use these functions by passing format string to arg_sigs.
+// Note that `code` requires you to provide a const C string known at compile
+// time, otherwise the "unable to find data for ASM/EM_JS const" error will be
+// thrown.
+// https://github.com/WebAssembly/binaryen/blob/51c8f2469f8fd05197b7694c65041b1567f2c6b5/src/wasm/wasm-emscripten.cpp#L183
+
+// C++ needs the nothrow attribute so -O0 doesn't lower these calls as invokes.
+__attribute__((nothrow))
+int emscripten_asm_const_int(const char* code, const char* arg_sigs, ...);
+__attribute__((nothrow))
+void* emscripten_asm_const_ptr(const char* code, const char* arg_sigs, ...);
+__attribute__((nothrow))
+double emscripten_asm_const_double(const char* code, const char* arg_sigs, ...);
+
+__attribute__((nothrow))
+int emscripten_asm_const_int_sync_on_main_thread(
+  const char* code, const char* arg_sigs, ...);
+__attribute__((nothrow))
+void* emscripten_asm_const_ptr_sync_on_main_thread(
+  const char* code, const char* arg_sigs, ...);
+__attribute__((nothrow))
+double emscripten_asm_const_double_sync_on_main_thread(
+  const char* code, const char* arg_sigs, ...);
+
+__attribute__((nothrow))
+void emscripten_asm_const_async_on_main_thread(
+  const char* code, const char* arg_sigs, ...);
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
+
+// EM_ASM does not work in strict C mode.
+#if !defined(__cplusplus) && defined(__STRICT_ANSI__)
+
+#define EM_ASM_ERROR _Pragma("GCC error(\"EM_ASM does not work in -std=c* modes, use -std=gnu* modes instead\")")
+#define EM_ASM(...) EM_ASM_ERROR
+#define EM_ASM_INT(...) EM_ASM_ERROR
+#define EM_ASM_PTR(...) EM_ASM_ERROR
+#define EM_ASM_DOUBLE(...) EM_ASM_ERROR
+#define MAIN_THREAD_EM_ASM(...) EM_ASM_ERROR
+#define MAIN_THREAD_EM_ASM_INT(...) EM_ASM_ERROR
+#define MAIN_THREAD_EM_ASM_PTR(...) EM_ASM_ERROR
+#define MAIN_THREAD_EM_ASM_DOUBLE(...) EM_ASM_ERROR
+#define MAIN_THREAD_ASYNC_EM_ASM(...) EM_ASM_ERROR
+#define EM_ASM_(...) EM_ASM_ERROR
+#define EM_ASM_ARGS(...) EM_ASM_ERROR
+#define EM_ASM_INT_V(...) EM_ASM_ERROR
+#define EM_ASM_DOUBLE_V(...) EM_ASM_ERROR
+
+#else
+
+// In wasm backend, we need to call the emscripten_asm_const_* functions with
+// the C vararg calling convention, because we will call it with a variety of
+// arguments, but need to generate a coherent import for the wasm module before
+// binaryen can run over it to fix up any calls to emscripten_asm_const_*.  In
+// order to read from a vararg buffer, we need to know the signatures to read.
+// We can use compile-time trickery to generate a format string, and read that
+// in JS in order to correctly handle the vararg buffer.
+
+#ifndef __cplusplus
+
+// We can use the generic selection C11 feature (that clang supports pre-C11
+// as an extension) to emulate function overloading in C.
+// All other types, including *all* pointer types go through the default case
+#ifdef __wasm64__
+#define LONG_CODE 'j'
+#else
+#define LONG_CODE 'i'
+#endif
+#define _EM_ASM_SIG_CHAR(x) _Generic((x), \
+    float: 'f', \
+    double: 'd', \
+    char: 'i', \
+    unsigned char: 'i', \
+    unsigned short: 'i', \
+    unsigned int: 'i', \
+    unsigned long: LONG_CODE, \
+    unsigned long long: 'j', \
+    signed char: 'i', \
+    signed short: 'i', \
+    signed int: 'i', \
+    signed long: LONG_CODE, \
+    signed long long: 'j', \
+    default: 'p')
+
+// This indirection is needed to allow us to concatenate computed results, e.g.
+//   #define BAR(N) _EM_ASM_CONCATENATE(FOO_, N)
+//   BAR(3) // rewritten to BAR_3
+// whereas using ## or _EM_ASM_CONCATENATE_ directly would result in BAR_N
+#define _EM_ASM_CONCATENATE(a, b) _EM_ASM_CONCATENATE_(a, b)
+#define _EM_ASM_CONCATENATE_(a, b) a##b
+
+// Counts arguments. We use $$ as a sentinel value to enable using ##__VA_ARGS__
+// which omits a comma in the event that we have 0 arguments passed, which is
+// necessary to keep the count correct.
+#define _EM_ASM_COUNT_ARGS_EXP(_$,_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,n,...) n
+#define _EM_ASM_COUNT_ARGS(...) \
+    _EM_ASM_COUNT_ARGS_EXP($$,##__VA_ARGS__,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+
+// Find the corresponding char for each argument.
+#define _EM_ASM_ARG_SIGS_0(x, ...)
+#define _EM_ASM_ARG_SIGS_1(x, ...) _EM_ASM_SIG_CHAR(x),
+#define _EM_ASM_ARG_SIGS_2(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_1(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_3(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_2(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_4(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_3(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_5(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_4(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_6(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_5(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_7(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_6(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_8(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_7(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_9(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_8(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_10(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_9(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_11(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_10(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_12(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_11(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_13(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_12(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_14(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_13(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_15(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_14(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_16(x, ...) _EM_ASM_SIG_CHAR(x), _EM_ASM_ARG_SIGS_15(__VA_ARGS__)
+#define _EM_ASM_ARG_SIGS_(N, ...) \
+    ((char[]){ _EM_ASM_CONCATENATE(_EM_ASM_ARG_SIGS_,N)(__VA_ARGS__) '\0' })
+
+#define _EM_ASM_ARG_SIGS(...) \
+    _EM_ASM_ARG_SIGS_(_EM_ASM_COUNT_ARGS(__VA_ARGS__), ##__VA_ARGS__)
+
+// We lead with commas to avoid adding an extra comma in the 0-argument case.
+#define _EM_ASM_PREP_ARGS(...) , _EM_ASM_ARG_SIGS(__VA_ARGS__), ##__VA_ARGS__
+
+#else // __cplusplus
+
+// C++ needs to support vararg template parameter packs, e.g. like in
+// test/core/test_em_asm_parameter_pack.cpp. Because of that, a macro-only
+// approach doesn't work (a macro applied to a parameter pack would expand
+// incorrectly). So we can use a template class instead to build a temporary
+// buffer of characters.
+
+// As emscripten is required to build successfully with -std=c++03, we cannot
+// use std::tuple or std::integral_constant. Using C++11 features is only a
+// warning in modern Clang, which are ignored in system headers.
+template<typename, typename = void> struct __em_asm_sig {};
+template<> struct __em_asm_sig<float> { static const char value = 'f'; };
+template<> struct __em_asm_sig<double> { static const char value = 'd'; };
+template<> struct __em_asm_sig<char> { static const char value = 'i'; };
+template<> struct __em_asm_sig<signed char> { static const char value = 'i'; };
+template<> struct __em_asm_sig<unsigned char> { static const char value = 'i'; };
+template<> struct __em_asm_sig<short> { static const char value = 'i'; };
+template<> struct __em_asm_sig<unsigned short> { static const char value = 'i'; };
+template<> struct __em_asm_sig<int> { static const char value = 'i'; };
+template<> struct __em_asm_sig<unsigned int> { static const char value = 'i'; };
+#if __wasm64__
+template<> struct __em_asm_sig<long> { static const char value = 'j'; };
+template<> struct __em_asm_sig<unsigned long> { static const char value = 'j'; };
+#else
+template<> struct __em_asm_sig<long> { static const char value = 'i'; };
+template<> struct __em_asm_sig<unsigned long> { static const char value = 'i'; };
+#endif
+template<> struct __em_asm_sig<bool> { static const char value = 'i'; };
+template<> struct __em_asm_sig<wchar_t> { static const char value = 'i'; };
+template<> struct __em_asm_sig<long long> { static const char value = 'j'; };
+template<> struct __em_asm_sig<unsigned long long> { static const char value = 'j'; };
+template<typename T> struct __em_asm_sig<T*> { static const char value = 'p'; };
+
+// Explicit support for enums, they're passed as int via variadic arguments.
+template<bool> struct __em_asm_if { };
+template<> struct __em_asm_if<true> { typedef void type; };
+template<typename T> struct __em_asm_sig<T, typename __em_asm_if<__is_enum(T)>::type> {
+    static const char value = 'i';
+};
+
+// Instead of std::tuple
+template<typename... Args>
+struct __em_asm_type_tuple {};
+
+// Instead of std::make_tuple
+template<typename... Args>
+__em_asm_type_tuple<Args...> __em_asm_make_type_tuple(Args... args) {
+    return {};
+}
+
+template<typename>
+struct __em_asm_sig_builder {};
+
+template<typename... Args>
+struct __em_asm_sig_builder<__em_asm_type_tuple<Args...> > {
+  inline static const char buffer[sizeof...(Args) + 1] = { __em_asm_sig<Args>::value..., 0 };
+};
+
+// We move to type level with decltype(make_tuple(...)) to avoid double
+// evaluation of arguments. Use __typeof__ instead of decltype, though,
+// because the header should be able to compile with clang's -std=c++03.
+#define _EM_ASM_PREP_ARGS(...) \
+    , __em_asm_sig_builder<__typeof__(__em_asm_make_type_tuple(__VA_ARGS__))>::buffer, ##__VA_ARGS__
+#endif // __cplusplus
+
+// Note: If the code block in the EM_ASM() family of functions below contains a
+// comma, then wrap the whole code block inside parentheses (). See
+// test/core/test_em_asm_2.cpp for example code snippets.
+
+#define CODE_EXPR(code) (__extension__({           \
+    __attribute__((section("em_asm"), aligned(1))) \
+    static const char x[] = code;                  \
+    x;                                             \
+  }))
+
+// Runs the given JavaScript code on the calling thread (synchronously), and
+// returns no value back.
+#define EM_ASM(code, ...) ((void)emscripten_asm_const_int(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__)))
+
+// Runs the given JavaScript code on the calling thread (synchronously), and
+// returns an i32 back.
+#define EM_ASM_INT(code, ...) emscripten_asm_const_int(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Runs the given JavaScript code on the calling thread (synchronously), and
+// returns an pointer back.
+// On wasm32 this is the same as emscripten_asm_const_int but on wasm64 it
+// returns an i64.
+#define EM_ASM_PTR(code, ...) emscripten_asm_const_ptr(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Runs the given JavaScript code on the calling thread (synchronously), and
+// returns a double back.
+#define EM_ASM_DOUBLE(code, ...) emscripten_asm_const_double(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Runs the given JavaScript code synchronously on the main browser thread, and
+// returns no value back.
+// Call this function for example to access DOM elements in a pthread when
+// building with -pthread.
+// Avoid calling this function in performance sensitive code, because this will
+// effectively sleep the calling thread until the main browser thread is able to
+// service the proxied function call. If you have multiple MAIN_THREAD_EM_ASM()
+// code blocks to call in succession, it will likely be much faster to coalesce
+// all the calls to a single MAIN_THREAD_EM_ASM() block. If you do not need
+// synchronization nor a return value back, consider using the function
+// MAIN_THREAD_ASYNC_EM_ASM() instead, which will not block.
+// In single-threaded builds (including proxy-to-worker), MAIN_THREAD_EM_ASM*()
+// functions are direct aliases to the corresponding EM_ASM*() family of
+// functions.
+#define MAIN_THREAD_EM_ASM(code, ...) ((void)emscripten_asm_const_int_sync_on_main_thread(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__)))
+
+// Runs the given JavaScript code synchronously on the main browser thread, and
+// returns an integer back.
+// The same considerations apply as with MAIN_THREAD_EM_ASM().
+#define MAIN_THREAD_EM_ASM_INT(code, ...) emscripten_asm_const_int_sync_on_main_thread(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Runs the given JavaScript code synchronously on the main browser thread, and
+// returns an pointer back.
+// The same considerations apply as with MAIN_THREAD_EM_ASM().
+// On wasm32 this is the same as emscripten_asm_const_int but on wasm64 it
+// returns an i64.
+#define MAIN_THREAD_EM_ASM_PTR(code, ...) emscripten_asm_const_ptr_sync_on_main_thread(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Runs the given JavaScript code synchronously on the main browser thread, and
+// returns a double back.
+// The same considerations apply as with MAIN_THREAD_EM_ASM().
+#define MAIN_THREAD_EM_ASM_DOUBLE(code, ...) emscripten_asm_const_double_sync_on_main_thread(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+
+// Asynchronously dispatches the given JavaScript code to be run on the main
+// browser thread.
+// If the calling thread is the main browser thread, then the specified
+// JavaScript code is executed synchronously. Otherwise an event will be queued
+// on the main browser thread to execute the call later (think postMessage()),
+// and this call will immediately return without waiting. Be sure to guard any
+// accesses to shared memory on the heap inside the JavaScript code with
+// appropriate locking.
+#define MAIN_THREAD_ASYNC_EM_ASM(code, ...) ((void)emscripten_asm_const_async_on_main_thread(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__)))
+
+// Old forms for compatibility, no need to use these.
+// Replace EM_ASM_, EM_ASM_ARGS and EM_ASM_INT_V with EM_ASM_INT,
+// and EM_ASM_DOUBLE_V with EM_ASM_DOUBLE.
+#define EM_ASM_(code, ...) emscripten_asm_const_int(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+#define EM_ASM_ARGS(code, ...) emscripten_asm_const_int(CODE_EXPR(#code) _EM_ASM_PREP_ARGS(__VA_ARGS__))
+#define EM_ASM_INT_V(code) EM_ASM_INT(code)
+#define EM_ASM_DOUBLE_V(code) EM_ASM_DOUBLE(code)
+
+
+// Normally macros like `true` and `false` are not expanded inside
+// of `EM_JS` or `EM_ASM` blocks.  However, in the case then an
+// additional macro later is added these will be expanded and we want
+// to make sure the resulting expansion doesn't break the expectations
+// of JS code
+#if defined(true) && defined(false)
+#undef true
+#undef false
+// These work for both C and javascript.
+// In C !!0 ==> 0 and in javascript !!0 ==> false
+// In C !!1 ==> 1 and in javascript !!1 ==> true
+#define true (!!1)
+#define false (!!0)
+#endif
+
+#endif // !defined(__cplusplus) && defined(__STRICT_ANSI__)
+
+/*
+ * Copyright 2020 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#define EMSCRIPTEN_KEEPALIVE __attribute__((used))
+
+#ifdef __wasm__
+#define EM_IMPORT(NAME) __attribute__((import_module("env"), import_name(#NAME)))
+#else
+#define EM_IMPORT(NAME)
+#endif
+
+#ifdef __cplusplus
+#define _EM_BEGIN_CDECL extern "C" {
+#define _EM_END_CDECL   }
+#else // __cplusplus
+#define _EM_BEGIN_CDECL
+#define _EM_END_CDECL
+#endif // __cplusplus
+
+/*
+ * EM_JS_DEPS: Use this macro to declare indirect dependencies on JS symbols.
+ * The first argument is just a unique name for the set of dependencies.  The
+ * second argument is a C string that lists JS library symbols in the same way
+ * they would be specified in the DEFAULT_LIBRARY_FUNCS_TO_INCLUDE command line
+ * setting.
+ *
+ * For example, if your code contains an EM_ASM or EM_JS block that make use of
+ * the allocate and stackSave JS library functions then you might write this in
+ * your library source code:
+ *
+ *   EM_JS_DEPS(mylib_dep, "$allocate,$stackSave");
+ *
+ * The emscripten linker will then pick this up and make sure those symbols get
+ * included in the JS support library.
+ *
+ * Dependencies declared in this way will be included if-and-only-if the object
+ * file (translation unit) in which they exist is included by the linker, so
+ * it makes sense co-locate them with the EM_JS or EM_ASM code they correspond
+ * to.
+ */
+#define EM_JS_DEPS(tag, deps)             \
+  _EM_BEGIN_CDECL                         \
+  EMSCRIPTEN_KEEPALIVE                    \
+  __attribute__((section("em_lib_deps"))) \
+  __attribute__((aligned(1)))             \
+  char __em_lib_deps_##tag[] = deps;      \
+  _EM_END_CDECL
+
+/*
+ * Copyright 2012 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+/* Typedefs */
+
+typedef short __attribute__((aligned(1))) emscripten_align1_short;
+
+typedef long long __attribute__((aligned(4))) emscripten_align4_int64;
+typedef long long __attribute__((aligned(2))) emscripten_align2_int64;
+typedef long long __attribute__((aligned(1))) emscripten_align1_int64;
+
+typedef int __attribute__((aligned(2))) emscripten_align2_int;
+typedef int __attribute__((aligned(1))) emscripten_align1_int;
+
+typedef float __attribute__((aligned(2))) emscripten_align2_float;
+typedef float __attribute__((aligned(1))) emscripten_align1_float;
+
+typedef double __attribute__((aligned(4))) emscripten_align4_double;
+typedef double __attribute__((aligned(2))) emscripten_align2_double;
+typedef double __attribute__((aligned(1))) emscripten_align1_double;
+
+typedef void (*em_callback_func)(void);
+typedef void (*em_arg_callback_func)(void*);
+typedef void (*em_str_callback_func)(const char *);
+
+/* Legacy EM_BOOL type. Emscripten no longer uses this */
+#define EM_BOOL bool
+#define EM_TRUE true
+#define EM_FALSE false
+
+#define EM_UTF8 char
+
+#define EMSCRIPTEN_RESULT int
+
+#define EMSCRIPTEN_RESULT_SUCCESS              0
+#define EMSCRIPTEN_RESULT_DEFERRED             1
+#define EMSCRIPTEN_RESULT_NOT_SUPPORTED       -1
+#define EMSCRIPTEN_RESULT_FAILED_NOT_DEFERRED -2
+#define EMSCRIPTEN_RESULT_INVALID_TARGET      -3
+#define EMSCRIPTEN_RESULT_UNKNOWN_TARGET      -4
+#define EMSCRIPTEN_RESULT_INVALID_PARAM       -5
+#define EMSCRIPTEN_RESULT_FAILED              -6
+#define EMSCRIPTEN_RESULT_NO_DATA             -7
+#define EMSCRIPTEN_RESULT_TIMED_OUT           -8
+
+/*
+ * Copyright 2018 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+// EM_JS declares JS functions in C code.
+// Example uses can be found in test/core/test_em_js.cpp
+
+// Implementation details:
+
+// The EM_JS macro is specified as:
+//   EM_JS(return type, function name, (arguments), {body})
+// but the macro uses __VA_ARGS__ instead of a fourth argument. This is so that
+// function bodies containing commas are seamlessly handled.
+
+// EM_JS declares the JS function with a C function prototype, which becomes a
+// function import in wasm. It also declares an __em_js__-prefixed string constant,
+// which we can use to pass information to the Emscripten compiler that survives
+// going through LLVM.
+// Example:
+//
+//   EM_JS(int, foo, (int x, int y), { return 2 * x + y; })
+//
+// would get translated into:
+//
+//   __attribute__((import_name("foo"))) int foo(int x, int y);
+//
+//   __attribute__((used)) static void* __em_js_ref_foo = (void*)&foo;
+//
+//   __attribute__((used, visibility("default")))
+//   char __em_js__foo[] = "(int x, int y)<::>{ return 2 * x + y; }";
+//
+// We pack the arguments and function body into a constant string so it's
+// readable during wasm post-processing.
+// Later we see an export called __em_js__foo, meaning we need to create a JS
+// function:
+//   function foo(x, y) { return 2 * x + y; }
+// We use <::> to separate the arguments from the function body because it isn't
+// valid anywhere in a C function declaration.
+
+// The __em_js_ref_foo pointer simply exists in order to force a reference to
+// `foo` to exist in the object file, even if there are no other local uses.
+// This means the linker will always use the import_name attribute for this
+// function even if it is not locally used.
+
+// Generated __em_js__-prefixed symbols are read by binaryen, and the string
+// data is extracted into the Emscripten metadata dictionary under the
+// "emJsFuncs" key. emJsFuncs itself is a dictionary where the keys are function
+// names (not prefixed with __em_js__), and the values are the <::>-including
+// description strings.
+
+// emJsFuncs metadata is read in emscripten.py's create_em_js, which creates an
+// array of JS function strings to be included in the JS output.
+
+#define _EM_JS(ret, c_name, js_name, params, code)                             \
+  _EM_BEGIN_CDECL                                                              \
+  ret c_name params EM_IMPORT(js_name);                                        \
+  __attribute__((visibility("hidden")))                                        \
+  void* __em_js_ref_##c_name = (void*)&c_name;                                 \
+  EMSCRIPTEN_KEEPALIVE                                                         \
+  __attribute__((section("em_js"), aligned(1))) char __em_js__##js_name[] =    \
+    #params "<::>" code;                                                       \
+  _EM_END_CDECL
+
+#define EM_JS(ret, name, params, ...) _EM_JS(ret, name, name, params, #__VA_ARGS__)
+
+#define EM_ASYNC_JS(ret, name, params, ...) _EM_JS(ret, name, __asyncjs__##name, params,          \
+  "{ return Asyncify.handleAsync(async () => " #__VA_ARGS__ "); }")
+
+
+// Normally macros like `true` and `false` are not expanded inside
+// of `EM_JS` or `EM_ASM` blocks.  However, in the case when an
+// additional macro later is added these will be expanded and we want
+// to make sure the resulting expansion doesn't break the expectations
+// of JS code
+#if defined(true) && defined(false)
+#undef true
+#undef false
+// These work for both C and javascript.
+// In C !!0 ==> 0 and in javascript !!0 ==> false
+// In C !!1 ==> 1 and in javascript !!1 ==> true
+#define true (!!1)
+#define false (!!0)
+#endif
+
+/*
+ * Copyright 2023 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// EXPERIMENTAL AND SUBJECT TO CHANGE!
+
+// An opaque handle to a JS Promise object.
+typedef struct _em_promise* em_promise_t;
+
+typedef enum em_promise_result_t {
+  EM_PROMISE_FULFILL,
+  EM_PROMISE_MATCH,
+  EM_PROMISE_MATCH_RELEASE,
+  EM_PROMISE_REJECT,
+} em_promise_result_t;
+
+// A callback passed to `emscripten_promise_then` to be invoked once a promise
+// is fulfilled or rejected. `data` is arbitrary user-provided data provided
+// when `emscripten_promise_then` is called to install the callback and `value`
+// is the value the promise was fulfilled or rejected with.
+//
+// The callback can signal how to resolve the new promise returned from
+// `emscripten_promise_then` via its return and by writing a new result to
+// outparam `result`. The behavior depends on the returned `em_promise_result_t`
+// value:
+//
+//  - `EM_PROMISE_FULFILL`: The new promise is fulfilled with the value written
+//    to `result` or NULL if no value is written.
+//
+//  - `EM_PROMISE_MATCH` or `EM_PROMISE_MATCH_RELEASE`: The callback must write
+//    a promise handle to `result` and the new promise is resolved to match the
+//    eventual state of that promise. `EM_PROMISE_MATCH_RELEASE` will also cause
+//    the written promise handle to be destroyed so that the user does not have
+//    to arrange for it to be destroyed after the callback is executed.
+//
+//  - `EM_PROMISE_REJECT`: The new promise is rejected with the reason written
+//    to `result` or NULL if no reason is written.
+//
+// If the callback throws a number (or bigint in the case of memory64), the new
+// promise will be rejected with that number converted to a pointer as its
+// rejection reason. If the callback throws any other value, the new promise
+// will be rejected with a NULL rejection reason.
+typedef em_promise_result_t (*em_promise_callback_t)(void** result,
+                                                     void* data,
+                                                     void* value);
+
+// Create a new promise that can be explicitly resolved or rejected using
+// `emscripten_promise_resolve`. The returned promise handle must eventually be
+// freed with `emscripten_promise_destroy`.
+__attribute__((warn_unused_result)) em_promise_t
+emscripten_promise_create(void);
+
+// Release the resources associated with this promise. This must be called on
+// every promise handle created, whether by `emscripten_promise_create` or any
+// other function that returns a fresh promise, such as
+// `emscripten_promise_then`. It is fine to call `emscripten_promise_destroy` on
+// a promise handle before the promise is resolved; the configured callbacks
+// will still be called.
+void emscripten_promise_destroy(em_promise_t promise);
+
+// Explicitly resolve the `promise` created by `emscripten_promise_create`. If
+// `result` is `EM_PROMISE_FULFILL`, then the promise is fulfilled with the
+// given `value`. If `result` is `EM_PROMISE_MATCH`, then the promise is
+// resolved to match the eventual state of `value` interpreted as a promise
+// handle. Finally, if `result` is `EM_PROMISE_REJECT`, then the promise is
+// rejected with the given value. Promises not created by
+// `emscripten_promise_create` should not be passed to this function.
+void emscripten_promise_resolve(em_promise_t promise,
+                                em_promise_result_t result,
+                                void* value);
+
+// Install `on_fulfilled` and `on_rejected` callbacks on the given `promise`,
+// creating and returning a handle to a new promise. See `em_promise_callback_t`
+// for documentation on how the callbacks work. `data` is arbitrary user data
+// that will be passed to the callbacks. The returned promise handle must
+// eventually be freed with `emscripten_promise_destroy`.
+__attribute__((warn_unused_result)) em_promise_t
+emscripten_promise_then(em_promise_t promise,
+                        em_promise_callback_t on_fulfilled,
+                        em_promise_callback_t on_rejected,
+                        void* data);
+
+// Call Promise.all to create and return a new promise that is either fulfilled
+// once the `num_promises` input promises passed in `promises` have been
+// fulfilled or is rejected once any of the input promises has been rejected.
+// When the returned promise is fulfilled, the values each of the input promises
+// were resolved with will be written to the `results` array if it is non-null
+// and the returned promise will be fulfilled with the address of that array as
+// well.
+__attribute__((warn_unused_result)) em_promise_t emscripten_promise_all(
+  em_promise_t* promises, void** results, size_t num_promises);
+
+typedef struct em_settled_result_t {
+  em_promise_result_t result;
+  void* value;
+} em_settled_result_t;
+
+// Call Promise.allSettled to create and return a new promise that is fulfilled
+// once the `num_promises` input promises passed in `promises` have been
+// settled. When the returned promise is fulfilled, the `results` buffer will be
+// filled with the result comprising of either EM_PROMISE_FULFILL and the
+// fulfilled value or EM_PROMISE_REJECT and the rejection reason for each of the
+// input promises if `results` is non-null. The returned promise will be
+// fulfilled with the value of `results` as well.
+__attribute__((warn_unused_result)) em_promise_t emscripten_promise_all_settled(
+  em_promise_t* promises, em_settled_result_t* results, size_t num_promises);
+
+// Call Promise.any to create and return a new promise that is fulfilled once
+// any of the `num_promises` input promises passed in `promises` has been
+// fulfilled or is rejected once all of the input promises have been rejected.
+// If the returned promise is fulfilled, it will be fulfilled with the same
+// value as the first fulfilled input promise. Otherwise, if the returned
+// promise is rejected, the rejection reasons for each input promise will be
+// written to the `errors` buffer if it is non-null. The rejection reason for
+// the returned promise will also be the address of the `errors` buffer.
+__attribute__((warn_unused_result)) em_promise_t emscripten_promise_any(
+  em_promise_t* promises, void** errors, size_t num_promises);
+
+// Call Promise.race to create and return a new promise that settles once any of
+// the `num_promises` input promises passed in `promises` has been settled. If
+// the first input promise to settle is fulfilled, the resulting promise is
+// fulfilled with the same value. Otherwise, if the first input promise to
+// settle is rejected, the resulting promise is rejected with the same reason.
+__attribute__((warn_unused_result)) em_promise_t
+emscripten_promise_race(em_promise_t* promises, size_t num_promises);
+
+// Suspend the current Wasm execution context until the given promise has been
+// settled.
+//
+// Since the stack is not unwound while Wasm execution is suspended, it is
+// safe to pass pointers to the stack to asynchronous work that is waited on
+// with this function.
+//
+// This function can only be used in programs that were built with `-sASYNCIFY`.
+__attribute__((warn_unused_result)) em_settled_result_t
+emscripten_promise_await(em_promise_t promise);
+
+#ifdef __cplusplus
+}
+#endif
+
+/*
+ * Copyright 2012 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// wget
+
+void emscripten_async_wget(const char* url, const char* file, em_str_callback_func onload, em_str_callback_func onerror);
+
+typedef void (*em_async_wget_onload_func)(void* userdata, void* data, int size);
+void emscripten_async_wget_data(const char* url, void *userdata, em_async_wget_onload_func onload, em_arg_callback_func onerror);
+
+typedef void (*em_async_wget2_onload_func)(unsigned handle, void* userdata, const char* data);
+typedef void (*em_async_wget2_onstatus_func)(unsigned handle, void* userdata, int status);
+
+int emscripten_async_wget2(const char* url, const char* file,  const char* requesttype, const char* param, void *userdata, em_async_wget2_onload_func onload, em_async_wget2_onstatus_func onerror, em_async_wget2_onstatus_func onprogress);
+
+typedef void (*em_async_wget2_data_onload_func)(unsigned handle, void* userdata, void* data, unsigned size);
+typedef void (*em_async_wget2_data_onerror_func)(unsigned handle, void* userdata, int status, const char* status_text);
+typedef void (*em_async_wget2_data_onprogress_func)(unsigned handle, void* userdata, int loaded, int total);
+
+int emscripten_async_wget2_data(const char* url, const char* requesttype, const char* param, void *arg, int free, em_async_wget2_data_onload_func onload, em_async_wget2_data_onerror_func onerror, em_async_wget2_data_onprogress_func onprogress);
+
+void emscripten_async_wget2_abort(int handle);
+
+// wget "sync"
+
+int emscripten_wget(const char* url, const char* file);
+
+void emscripten_wget_data(const char* url, void** pbuffer, int* pnum, int *perror);
+
+#ifdef __cplusplus
+}
+#endif
+
+/* Automatically generated by tools/system_libs.py */
+#define __EMSCRIPTEN_MAJOR__ 5
+#define __EMSCRIPTEN_MINOR__ 0
+#define __EMSCRIPTEN_TINY__ 2
+
+// Legacy mixed-case macros:
+#define __EMSCRIPTEN_major__ __EMSCRIPTEN_MAJOR__
+#define __EMSCRIPTEN_minor__ __EMSCRIPTEN_MINOR__
+#define __EMSCRIPTEN_tiny__ __EMSCRIPTEN_TINY__
+#pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+#pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+#pragma clang deprecated(__EMSCRIPTEN_tiny__, "Use __EMSCRIPTEN_TINY__ instead")
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void emscripten_run_script(const char *script __attribute__((nonnull)));
+int emscripten_run_script_int(const char *script __attribute__((nonnull)));
+char *emscripten_run_script_string(const char *script __attribute__((nonnull)));
+void emscripten_async_run_script(const char *script __attribute__((nonnull)), int millis);
+void emscripten_async_load_script(const char *script __attribute__((nonnull)), em_callback_func onload, em_callback_func onerror);
+
+void emscripten_set_main_loop(em_callback_func func, int fps, bool simulate_infinite_loop);
+
+#define EM_TIMING_SETTIMEOUT 0
+#define EM_TIMING_RAF 1
+#define EM_TIMING_SETIMMEDIATE 2
+
+int emscripten_set_main_loop_timing(int mode, int value);
+void emscripten_get_main_loop_timing(int *mode, int *value); // Pass a null pointer to skip receiving that particular value
+void emscripten_set_main_loop_arg(em_arg_callback_func func, void *arg, int fps, bool simulate_infinite_loop);
+void emscripten_pause_main_loop(void);
+void emscripten_resume_main_loop(void);
+void emscripten_cancel_main_loop(void);
+
+typedef void (*em_socket_callback)(int fd, void *userData);
+typedef void (*em_socket_error_callback)(int fd, int err, const char* msg, void *userData);
+
+void emscripten_set_socket_error_callback(void *userData, em_socket_error_callback callback);
+void emscripten_set_socket_open_callback(void *userData, em_socket_callback callback);
+void emscripten_set_socket_listen_callback(void *userData, em_socket_callback callback);
+void emscripten_set_socket_connection_callback(void *userData, em_socket_callback callback);
+void emscripten_set_socket_message_callback(void *userData, em_socket_callback callback);
+void emscripten_set_socket_close_callback(void *userData, em_socket_callback callback);
+
+void _emscripten_push_main_loop_blocker(em_arg_callback_func func, void *arg, const char *name);
+void _emscripten_push_uncounted_main_loop_blocker(em_arg_callback_func func, void *arg, const char *name);
+#define emscripten_push_main_loop_blocker(func, arg) \
+  _emscripten_push_main_loop_blocker(func, arg, #func)
+#define emscripten_push_uncounted_main_loop_blocker(func, arg) \
+  _emscripten_push_uncounted_main_loop_blocker(func, arg, #func)
+
+void emscripten_set_main_loop_expected_blockers(int num);
+
+void emscripten_async_call(em_arg_callback_func func, void *arg, int millis);
+
+void emscripten_exit_with_live_runtime(void) __attribute__((__noreturn__));
+void emscripten_force_exit(int status) __attribute__((__noreturn__));
+
+double emscripten_get_device_pixel_ratio(void);
+
+char *emscripten_get_window_title(void);
+void emscripten_set_window_title(const char *);
+void emscripten_get_screen_size(int *width __attribute__((nonnull)), int *height __attribute__((nonnull)));
+void emscripten_hide_mouse(void);
+void emscripten_set_canvas_size(int width, int height) __attribute__((deprecated("This variant does not allow specifying the target canvas", "Use emscripten_set_canvas_element_size() instead")));
+void emscripten_get_canvas_size(int *width __attribute__((nonnull)), int *height __attribute__((nonnull)), int *isFullscreen __attribute__((nonnull))) __attribute__((deprecated("This variant does not allow specifying the target canvas", "Use emscripten_get_canvas_element_size() and emscripten_get_fullscreen_status() instead")));
+
+double emscripten_get_now(void);
+float emscripten_random(void);
+
+// IDB
+
+typedef void (*em_idb_onload_func)(void*, void*, int);
+void emscripten_idb_async_load(const char *db_name __attribute__((nonnull)), const char *file_id __attribute__((nonnull)), void* arg, em_idb_onload_func onload, em_arg_callback_func onerror);
+void emscripten_idb_async_store(const char *db_name __attribute__((nonnull)), const char *file_id __attribute__((nonnull)), void* ptr, int num, void* arg, em_arg_callback_func onstore, em_arg_callback_func onerror);
+void emscripten_idb_async_delete(const char *db_name __attribute__((nonnull)), const char *file_id __attribute__((nonnull)), void* arg, em_arg_callback_func ondelete, em_arg_callback_func onerror);
+typedef void (*em_idb_exists_func)(void*, int);
+void emscripten_idb_async_exists(const char *db_name __attribute__((nonnull)), const char *file_id __attribute__((nonnull)), void* arg, em_idb_exists_func oncheck, em_arg_callback_func onerror);
+void emscripten_idb_async_clear(const char *db_name __attribute__((nonnull)), void* arg, em_arg_callback_func onclear, em_arg_callback_func onerror);
+
+// IDB "sync"
+
+void emscripten_idb_load(const char *db_name, const char *file_id, void** pbuffer, int* pnum, int *perror);
+void emscripten_idb_store(const char *db_name, const char *file_id, void* buffer, int num, int *perror);
+void emscripten_idb_delete(const char *db_name, const char *file_id, int *perror);
+void emscripten_idb_exists(const char *db_name, const char *file_id, int* pexists, int *perror);
+void emscripten_idb_clear(const char *db_name, int *perror);
+
+// other async utilities
+
+int emscripten_run_preload_plugins(const char* file, em_str_callback_func onload, em_str_callback_func onerror);
+
+typedef void (*em_run_preload_plugins_data_onload_func)(void*, const char*);
+void emscripten_run_preload_plugins_data(char* data, int size, const char *suffix, void *arg, em_run_preload_plugins_data_onload_func onload, em_arg_callback_func onerror);
+
+// show an error on some renamed methods
+#define emscripten_async_prepare(...) _Pragma("GCC error(\"emscripten_async_prepare has been replaced by emscripten_run_preload_plugins\")")
+#define emscripten_async_prepare_data(...) _Pragma("GCC error(\"emscripten_async_prepare_data has been replaced by emscripten_run_preload_plugins_data\")")
+
+// worker APIs
+
+typedef int worker_handle;
+
+worker_handle emscripten_create_worker(const char *url);
+void emscripten_destroy_worker(worker_handle worker);
+
+typedef void (*em_worker_callback_func)(char*, int, void*);
+void emscripten_call_worker(worker_handle worker, const char *funcname, char *data, int size, em_worker_callback_func callback, void *arg);
+void emscripten_worker_respond(char *data, int size);
+void emscripten_worker_respond_provisionally(char *data, int size);
+
+int emscripten_get_worker_queue_size(worker_handle worker);
+
+// misc.
+
+long emscripten_get_compiler_setting(const char *name);
+
+// Returns the value of -sASYNCIFY.  Can be 0, 1, or 2 (in the case of JSPI).
+int emscripten_has_asyncify(void);
+
+void emscripten_debugger(void);
+
+// Forward declare FILE from musl libc headers to avoid needing to #include <stdio.h> from emscripten.h
+struct _IO_FILE;
+typedef struct _IO_FILE FILE;
+
+char *emscripten_get_preloaded_image_data(const char *path, int *w, int *h);
+char *emscripten_get_preloaded_image_data_from_FILE(FILE *file, int *w, int *h);
+
+#define EM_LOG_CONSOLE   1
+#define EM_LOG_WARN      2
+#define EM_LOG_ERROR     4
+#define EM_LOG_C_STACK   8
+#define EM_LOG_JS_STACK 16
+#define EM_LOG_DEMANGLE 32  // deprecated
+#pragma clang deprecated(EM_LOG_DEMANGLE)
+#define EM_LOG_NO_PATHS 64
+#define EM_LOG_FUNC_PARAMS 128  // deprecated
+#pragma clang deprecated(EM_LOG_FUNC_PARAMS)
+#define EM_LOG_DEBUG    256
+#define EM_LOG_INFO     512
+
+void emscripten_log(int flags, const char* format, ...);
+
+int emscripten_get_callstack(int flags, char *out, int maxbytes);
+
+int emscripten_print_double(double x, char *to, signed max);
+
+typedef void (*em_scan_func)(void*, void*);
+void emscripten_scan_registers(em_scan_func func);
+void emscripten_scan_stack(em_scan_func func);
+
+// Asynchronous version of dlopen.  Since WebAssembly module loading in general
+// is asynchronous the normal dlopen function can't be used in all situations.
+typedef void (*em_dlopen_callback)(void* user_data, void* handle);
+void emscripten_dlopen(const char *filename, int flags, void* user_data, em_dlopen_callback onsuccess, em_arg_callback_func onerror);
+
+// Promisified version of emscripten_dlopen
+// The returned promise will resolve once the dso has been loaded.  It's up to
+// the caller to call emscripten_promise_destroy on this promise.
+em_promise_t emscripten_dlopen_promise(const char *filename, int flags);
+
+void emscripten_throw_number(double number);
+void emscripten_throw_string(const char *utf8String);
+
+/* ===================================== */
+/* Internal APIs. Be careful with these. */
+/* ===================================== */
+
+void emscripten_sleep(unsigned int ms);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* EMSCRIPTEN_H */
+#endif /* OS_BROWSER */
 
 /*************************************************************************
  * GLFW 3.3 - www.glfw.org
@@ -56234,6 +58397,7 @@ https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow
 https://patorjk.com/software/taag/#p=display&f=ANSI%20Shadow
 
 21.04.23:
+Created by Ryan Srichai 21.04.23:
 unitype list, supports a variety of types
 
 example usage:
@@ -56261,7 +58425,7 @@ list_free(newList);
 Notes:
 Strings added to the list will be "strdup"d - meaning that you can pass in stack allocated buffers and string literals. This does not apply to pointers added to the list which must be heap allocated
 When calling list_clear() or list_free(), the list will free all strings, pointers, and lists within itself. If you don't want this to happen append the item to the list as a uint64
-list_copy will make a copy of all strings, pointers, and lists - it will not use the same pointers (a list can be safely freed after being copied without causing effects to the copied list)
+list_copy will make a copy of all strings, pointers, and lists - it will not use the same pointers (a list can be safely freed after being copied without causing effects to the copied list). The data in pointers is not copied as the list does not know how big the data is
 You must call list_init() when intending to copy a list - all lists must be initialised before any functions can be called on them (if your program is crashing - check to make sure you initialised all your lists)
 */
 
@@ -56274,6 +58438,19 @@ list_t *list_init() {
     list -> type = calloc(1, sizeof(char));
     list -> data = calloc(1, sizeof(unitype));
     return list;
+}
+
+/* acquire lock on list (only do this in multithreaded applications) */
+void list_acquire(list_t *list) {
+    while (list -> lock) {
+        asm("nop");
+    }
+    list -> lock = 1;
+}
+
+/* release lock on list (only do this in multithreaded applications) */
+void list_release(list_t *list) {
+    list -> lock = 0;
 }
 
 /* append to list, must specify type */
@@ -56362,7 +58539,7 @@ unitype list_delete(list_t *list, int32_t index) {
     if (list -> type[index] == 's' || list -> type[index] == 'p') {
         free(list -> data[index].p);
     }
-    for (uint32_t i = index; i < list -> length - 1 ; i++) {
+    for (int32_t i = index; i < list -> length - 1 ; i++) {
         list -> data[i] = list -> data[i + 1];
         list -> type[i] = list -> type[i + 1];
     }
@@ -56378,14 +58555,14 @@ unitype list_delete(list_t *list, int32_t index) {
 }
 
 /* deletes many items from the list spanning from [indexMin] to [indexMax - 1] */
-void list_delete_range(list_t *list, uint32_t indexMin, uint32_t indexMax) {
+void list_delete_range(list_t *list, int32_t indexMin, int32_t indexMax) {
     if (indexMin > indexMax) {
-        uint32_t swap = indexMin;
+        int32_t swap = indexMin;
         indexMin = indexMax;
         indexMax = swap;
     }
     int8_t zerod = 0; // edge case: "should've used list_clear"
-    uint32_t difference = (indexMax - indexMin);
+    int32_t difference = (indexMax - indexMin);
     list -> realLength = list -> length - difference;
     if (list -> realLength <= 1) {
         zerod = 1;
@@ -56394,17 +58571,18 @@ void list_delete_range(list_t *list, uint32_t indexMin, uint32_t indexMax) {
     
     int8_t *newType = malloc(list -> realLength * sizeof(int8_t)); // no need to calloc we're gonna fill it all up anyway
     unitype *newData = malloc(list -> realLength * sizeof(unitype));
-    for (uint32_t i = 0; i < indexMin; i++) {
+    for (int32_t i = 0; i < indexMin; i++) {
         newType[i] = list -> type[i];
         newData[i] = list -> data[i];
     }
-    for (uint32_t i = indexMax; i < list -> length; i++) {
+    for (int32_t i = indexMax; i < list -> length; i++) {
         newType[i - difference] = list -> type[i];
         newData[i - difference] = list -> data[i];
     }
     list -> length = list -> realLength;
-    if (zerod)
+    if (zerod) {
         list -> length = 0;
+    }
     free(list -> type);
     free(list -> data);
     list -> type = newType;
@@ -56416,7 +58594,6 @@ int32_t unitype_check_equal(unitype item1, unitype item2, int8_t typeItem1, int8
     if ((typeItem1 == 's' || typeItem2 == 's' || typeItem1 == 'p' || typeItem2 == 'p' || typeItem1 == 'r' || typeItem2 == 'r') && typeItem1 != typeItem2) {
         return 0;
     }
-
     switch (typeItem1) {
         case LIST_TYPE_CHAR:
             if (item1.c == item2.c) {return 1;}
@@ -56460,7 +58637,7 @@ int32_t unitype_check_equal(unitype item1, unitype item2, int8_t typeItem1, int8
 
 /* returns the index of the first instance of the item in the list, returns -1 if not found */
 int32_t list_find(list_t *list, unitype item, char type) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (unitype_check_equal(list -> data[i], item, list -> type[i], type)) {
             return i;
         }
@@ -56470,7 +58647,7 @@ int32_t list_find(list_t *list, unitype item, char type) {
 
 /* duplicate of list_find */
 int32_t list_index(list_t *list, unitype item, char type) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (unitype_check_equal(list -> data[i], item, list -> type[i], type)) {
             return i;
         }
@@ -56479,9 +58656,9 @@ int32_t list_index(list_t *list, unitype item, char type) {
 }
 
 /* counts how many instances of an item is found in the list */
-uint32_t list_count(list_t *list, unitype item, char type) {
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < list -> length; i++) {
+int32_t list_count(list_t *list, unitype item, char type) {
+    int32_t count = 0;
+    for (int32_t i = 0; i < list -> length; i++) {
         count += unitype_check_equal(list -> data[i], item, list -> type[i], type);
     }
     return count;
@@ -56492,7 +58669,7 @@ void list_sort(list_t *list) {
     /* create min heap */
     int64_t temp;
     int8_t tempType;
-    for (uint32_t i = 2; i < list -> length + 1; i++) {
+    for (int32_t i = 2; i < list -> length + 1; i++) {
         int32_t j = i;
         while (j > 1 && list -> data[j / 2 - 1].l > list -> data[j - 1].l) {
             temp = list -> data[j / 2 - 1].l;
@@ -56504,7 +58681,6 @@ void list_sort(list_t *list) {
             j /= 2;
         }
     }
-    list_print(list);
     /* heapsort */
     for (int32_t i = list -> length - 1; i > 0; i--) {
         temp = list -> data[0].l;
@@ -56543,7 +58719,7 @@ list_t *list_sort_index(list_t *list) {
     }
     for (int32_t j = 0; j < list -> length; j++) {
         int32_t max = -2147483648;
-        int64_t maxIndex = -1;
+        int32_t maxIndex = -1;
         for (int32_t i = 0; i < list -> length; i++) {
             if (list -> data[i].i > max && marked[i] == 0) {
                 max = list -> data[i].i;
@@ -56567,7 +58743,7 @@ list_t *list_sort_index_double(list_t *list) {
     }
     for (int32_t j = 0; j < list -> length; j++) {
         double max = -1.79769313486231570814527423731704357e+308;
-        int64_t maxIndex = -1;
+        int32_t maxIndex = -1;
         for (int32_t i = 0; i < list -> length; i++) {
             if (list -> data[i].d > max && marked[i] == 0) {
                 max = list -> data[i].d;
@@ -56582,13 +58758,16 @@ list_t *list_sort_index_double(list_t *list) {
     return output;
 }
 
+/* Note on double sorts - it may be possible to use uint64_t consistent comparison for doubles - however i am not sure if setting the integer portion of the unitype union will fill the top four bytes with 0s.
+If it doesn't then the scheme will not work */
+
 /* sort list (stride) */
 void list_sort_stride(list_t *list, int32_t stride, int32_t offset) {
     offset %= stride;
     /* create min heap */
     int64_t temp;
     int8_t tempType;
-    for (uint32_t i = 2; i < list -> length / stride + 1; i++) {
+    for (int32_t i = 2; i < list -> length / stride + 1; i++) {
         int32_t j = i;
         while (j > 1 && list -> data[(j / 2 - 1) * stride + offset].i > list -> data[(j - 1) * stride + offset].i) {
             for (int32_t k = 0; k < stride; k++) {
@@ -56641,51 +58820,61 @@ void list_sort_stride(list_t *list, int32_t stride, int32_t offset) {
 
 /* return a list of indices that would sort the list (stride) */
 list_t *list_sort_stride_index(list_t *list, int32_t stride, int32_t offset) {
+    offset %= stride;
+    int8_t *marked = calloc(list -> length / stride, 1);
     list_t *output = list_init();
-    // for (int32_t i = 0; i < list -> length / stride; i++) {
-    //     list_append(output, (unitype) -1, 'i');
-    // }
-    // for (int32_t j = 0; j < list -> length / stride; j++) {
-    //     int32_t max = -2147483648;
-    //     int64_t maxIndex = -1;
-    //     for (int32_t i = 0; i < list -> length / stride; i++) {
-    //         if (list -> data[i * stride + offset].i > max && output -> data[i].i == -1) {
-    //             max = list -> data[i * stride + offset].i;
-    //             maxIndex = i;
-    //         }
-    //     }
-    //     if (maxIndex > -1) {
-    //         output -> data[maxIndex].i = j * stride + offset;
-    //     }
-    // }
+    for (int32_t i = 0; i < list -> length; i++) {
+        list_append(output, (unitype) -1, 'i');
+    }
+    for (int32_t j = 0; j < list -> length; j += stride) {
+        int32_t max = -2147483648;
+        int32_t maxIndex = -1;
+        for (int32_t i = offset; i < list -> length; i += stride) {
+            if (list -> data[i].i > max && marked[i / stride] == 0) {
+                max = list -> data[i].i;
+                maxIndex = i;
+            }
+        }
+        if (maxIndex > -1) {
+            marked[maxIndex / stride] = 1;
+            for (int32_t k = 0; k < stride; k++) {
+                output -> data[j + k].i = maxIndex - offset + k;
+            }
+        }
+    }
     return output;
 }
 
 /* return a list of indices that would sort the list (stride) (for a list of doubles) */
 list_t *list_sort_stride_index_double(list_t *list, int32_t stride, int32_t offset) {
+    offset %= stride;
+    int8_t *marked = calloc(list -> length / stride, 1);
     list_t *output = list_init();
-    // for (int32_t i = 0; i < list -> length / stride; i++) {
-    //     list_append(output, (unitype) -1, 'i');
-    // }
-    // for (int32_t j = 0; j < list -> length / stride; j++) {
-    //     double max = -1.79769313486231570814527423731704357e+308;
-    //     int64_t maxIndex = -1;
-    //     for (int32_t i = 0; i < list -> length / stride; i++) {
-    //         if (list -> data[i * stride + offset].d > max && output -> data[i].i == -1) {
-    //             max = list -> data[i * stride + offset].d;
-    //             maxIndex = i;
-    //         }
-    //     }
-    //     if (maxIndex > -1) {
-    //         output -> data[maxIndex].i = j * stride + offset;
-    //     }
-    // }
+    for (int32_t i = 0; i < list -> length; i++) {
+        list_append(output, (unitype) -1, 'i');
+    }
+    for (int32_t j = 0; j < list -> length; j += stride) {
+        double max = -1.79769313486231570814527423731704357e+308;
+        int32_t maxIndex = -1;
+        for (int32_t i = offset; i < list -> length; i += stride) {
+            if (list -> data[i].d > max && marked[i / stride] == 0) {
+                max = list -> data[i].d;
+                maxIndex = i;
+            }
+        }
+        if (maxIndex > -1) {
+            marked[maxIndex / stride] = 1;
+            for (int32_t k = 0; k < stride; k++) {
+                output -> data[j + k].i = maxIndex - offset + k;
+            }
+        }
+    }
     return output;
 }
 
 /* deletes the first instance of the item from the list, returns the index the item was at, returns -1 and doesn't modify the list if not found */
 int32_t list_remove(list_t *list, unitype item, char type) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (unitype_check_equal(list -> data[i], item, list -> type[i], type)) {
             list_delete(list, i);
             return i;
@@ -56737,7 +58926,7 @@ void unitype_fprint(FILE *fp, unitype item, char type) {
             fprintf(fp, "%p", item.p);
         break;
         case LIST_TYPE_LIST:
-            list_fprint_emb(fp, item.r);
+            list_fprint(fp, item.r);
         break;
         default:
             printf("unitype_fprint - type %d not recognized\n", type);
@@ -56750,36 +58939,43 @@ void list_copy(list_t *dest, list_t *src) {
     list_free_lite(dest);
     dest -> type = calloc(src -> realLength, sizeof(int32_t));
     dest -> data = calloc(src -> realLength, sizeof(unitype));
-    uint32_t len = src -> length;
+    int32_t len = src -> length;
     dest -> length = len;
     dest -> realLength = src -> realLength;
-    for (uint32_t i = 0; i < len; i++) {
+    for (int32_t i = 0; i < len; i++) {
         dest -> type[i] = src -> type[i];
         if (src -> type[i] == 'r') {
             dest -> data[i] = (unitype) (void *) list_init();
             list_copy(dest -> data[i].r, src -> data[i].r);
+        } else if (src -> type[i] == 'p') {
+            dest -> type[i] = 'l';
+            dest -> data[i] = src -> data[i];
+        } else if (src -> type[i] == 's') {
+            dest -> data[i].s = strdup(src -> data[i].s);
         } else {
-            if (src -> type[i] == 'p') {
-                memcpy(dest -> data[i].p, src -> data[i].p, sizeof(unitype));
-            } else {
-                if (src -> type[i] == 's') {
-                    dest -> data[i].s = strdup(src -> data[i].s);
-                } else {
-                    dest -> data[i] = src -> data[i];
-                }
-            }
+            dest -> data[i] = src -> data[i];
         }
     }
 }
 
-/* prints the list without brackets */
+/* prints the list to a file without brackets */
 void list_fprint_emb(FILE *fp, list_t *list) {
+    for (int32_t i = 0; i < list -> length; i++) {
+        unitype_fprint(fp, list -> data[i], list -> type[i]);
+        if (i != list -> length - 1) {
+            fprintf(fp, ", ");
+        }
+    }
+}
+
+/* prints the list to a file */
+void list_fprint(FILE *fp, list_t *list) {
     fprintf(fp, "[");
     if (list -> length == 0) {
         fprintf(fp, "]");
         return;
     }
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         unitype_fprint(fp, list -> data[i], list -> type[i]);
         if (i == list -> length - 1) {
             fprintf(fp, "]");
@@ -56791,7 +58987,7 @@ void list_fprint_emb(FILE *fp, list_t *list) {
 
 /* prints the list */
 void list_print(list_t *list) {
-    list_fprint_emb(stdout, list);
+    list_fprint(stdout, list);
     printf("\n");
 }
 
@@ -56802,7 +58998,7 @@ void list_print_type(list_t *list) {
         printf("]\n");
         return;
     }
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         printf("%c", list -> type[i]);
         if (i == list -> length - 1) {
             printf("]\n");
@@ -56812,9 +59008,210 @@ void list_print_type(list_t *list) {
     }
 }
 
+/* writes list to a file in a special format: [data, type, data, type, ...]. Can be retrieved with list_read() */
+void list_write(FILE *fp, list_t *list) {
+    fprintf(fp, "[");
+    if (list -> length == 0) {
+        fprintf(fp, "]");
+        return;
+    }
+    for (int32_t i = 0; i < list -> length; i++) {
+        if (list -> type[i] == 's') {
+            /* special: add escape characters (\) before commas (,) left brackets ([), and right brackets (]) to avoid ambiguity */
+            char *originalString = list -> data[i].s;
+            int32_t len = strlen(originalString);
+            char *writeString = malloc(len * 2 + 2);
+            int32_t writeStringNext = 0;
+            for (int32_t j = 0; j < len; j++) {
+                if (originalString[j] == ',' || originalString[j] == '[' || originalString[j] == ']') {
+                    writeString[writeStringNext] = '\\';
+                    writeStringNext++;
+                }
+                writeString[writeStringNext] = originalString[j];
+                writeStringNext++;
+            }
+            if (writeStringNext > 0 && writeString[writeStringNext - 1] == '\\') {
+                writeString[writeStringNext] = ' '; // special: if a '\' is the last character add a space to avoid ignoring the succeeding comma
+                writeStringNext++;
+            }
+            writeString[writeStringNext] = '\0';
+            fprintf(fp, "%s", writeString);
+            free(writeString);
+        } else if (list -> type[i] == 'r') {
+            /* special: list should get written in list_write format */
+            list_write(fp, list -> data[i].r);
+        } else {
+            unitype_fprint(fp, list -> data[i], list -> type[i]);
+        }
+        fprintf(fp, ", %c", list -> type[i]);
+        if (i == list -> length - 1) {
+            fprintf(fp, "]");
+        } else {
+            fprintf(fp, ", ");
+        }
+    }
+}
+
+/* a list_append that takes a string and parses it to the appropriate type */
+void list_append_element(list_t *list, char *element, char type) {
+    switch (type) {
+        case LIST_TYPE_CHAR:;
+            int8_t itemChar;
+            sscanf(element, "%c", &itemChar);
+            list_append(list, (unitype) itemChar, type);
+            return;
+        case LIST_TYPE_INT8:
+        case LIST_TYPE_UINT8:; // UINT8 or BOOL
+            int8_t itemByte;
+            sscanf(element, "%hhd", &itemByte);
+            list_append(list, (unitype) itemByte, type);
+            return;
+        case LIST_TYPE_INT16:
+        case LIST_TYPE_UINT16:;
+            int16_t itemShort;
+            sscanf(element, "%hd", &itemShort);
+            list_append(list, (unitype) itemShort, type);
+            return;
+        case LIST_TYPE_INT32:
+        case LIST_TYPE_UINT32:;
+            int32_t itemInt;
+            sscanf(element, "%d", &itemInt);
+            list_append(list, (unitype) itemInt, type);
+            return;
+        case LIST_TYPE_INT64:
+        case LIST_TYPE_UINT64:;
+            int64_t itemLong;
+            sscanf(element, "%lld", &itemLong);
+            list_append(list, (unitype) itemLong, type);
+            return;
+        case LIST_TYPE_FLOAT:;
+            float itemFloat;
+            sscanf(element, "%f", &itemFloat);
+            list_append(list, (unitype) itemFloat, type);
+            return;
+        case LIST_TYPE_DOUBLE:;
+            double itemDouble;
+            sscanf(element, "%lf", &itemDouble);
+            list_append(list, (unitype) itemDouble, type);
+            return;
+        case LIST_TYPE_STRING:;
+            list_append(list, (unitype) element, type);
+            return;
+        case LIST_TYPE_POINTER:;
+            void *itemPointer;
+            sscanf(element, "%p", &itemPointer); // i honestly don't know if this will work
+            list_append(list, (unitype) itemPointer, type);
+            return;
+        case LIST_TYPE_LIST:
+            printf("list_append_element - no support for list\n");
+            return;
+        default:
+            printf("list_append_element - type %d not recognized\n", type);
+            return;
+    }
+}
+
+/* reads list from a file that was written to with list_write() - ensure file pointer is located at the start of the list */
+list_t *list_read(FILE *fp) {
+    list_t *output = list_init();
+    /* locate start of list */
+    char checkChar;
+    int32_t status;
+    do {
+        status = fread(&checkChar, 1, 1, fp);
+        if (checkChar == '[') {
+            break;
+        }
+    } while (status == 1);
+    if (status != 1) {
+        printf("list_read: ERROR - Could not locate start of list\n");
+        return output;
+    }
+    char *item = malloc(2048); // no string can exceed 2048 characters
+    while (status == 1) {
+        /* read item */
+        int32_t writePointer = 0;
+        int8_t backslashFound = 0;
+        list_t *embeddedList = NULL;
+        while (writePointer < 2047 && status == 1) {
+            status = fread(item + writePointer, 1, 1, fp);
+            if (!backslashFound && item[writePointer] == ',') {
+                /* end of element */
+                break;
+            }
+            if (!backslashFound && item[writePointer] == '[') {
+                /* embedded list */
+                fseek(fp, -1, SEEK_CUR); // move filepointer back one
+                embeddedList = list_read(fp);
+                status = fread(&checkChar, 1, 1, fp); // skip comma
+                if (checkChar != ',') {
+                    /* expected comma here - fail */
+                    free(item);
+                    printf("list_read: ERROR - expected comma after embedded list\n");
+                    return output;
+                }
+                break;
+            }
+            if (!backslashFound && item[writePointer] == ']') {
+                /* end of list - should not happen here (missing type) */
+                return output;
+            }
+            if (backslashFound && item[writePointer] != ',' && item[writePointer] != '[' && item[writePointer] != ']') {
+                /* readd backslash */
+                char savedChar = item[writePointer];
+                item[writePointer] = '\\';
+                writePointer++;
+                item[writePointer] = savedChar;
+            }
+            backslashFound = 0;
+            if (item[writePointer] == '\\') {
+                writePointer--;
+                backslashFound = 1;
+            }
+            writePointer++;
+        }
+        if (status != 1) {
+            free(item);
+            printf("list_read: ERROR - Failed to find end of list\n");
+            return output;
+        }
+        item[writePointer] = '\0';
+        /* read type */
+        status = fread(&checkChar, 1, 1, fp); // skip space
+        status = fread(&checkChar, 1, 1, fp);
+        if (checkChar == LIST_TYPE_LIST) {
+            if (embeddedList == NULL) {
+                /* type indicated list but no list was found - fail */
+                free(item);
+                printf("list_read: ERROR - type indicated list but no list was found\n");
+                return output;
+            }
+            list_append(output, (unitype) embeddedList, 'r');
+        } else {
+            list_append_element(output, item, checkChar);
+        }
+        status = fread(&checkChar, 1, 1, fp); // skip comma
+        if (checkChar == ']') {
+            /* end of list */
+            free(item);
+            return output;
+        }
+        if (checkChar != ',') {
+            /* expected comma here - fail */
+            free(item);
+            printf("list_read: ERROR - expected comma or end of list\n");
+            return output;
+        }
+        status = fread(&checkChar, 1, 1, fp); // skip space
+    }
+    free(item);
+    printf("list_read: ERROR - Failed to find end of list\n");
+    return output;
+}
+
 /* frees the list's data but not the list itself */
 void list_free_lite(list_t *list) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (list -> type[i] == 'r') {
             list_free(list -> data[i].r);
         }
@@ -56833,7 +59230,7 @@ void list_free(list_t *list) {
 }
 
 /* creates a sublist (from bottom to top - 1) out of an existing list, do not modify a parent list while a sublist exist */
-sublist_t *sublist_init(list_t *list, uint32_t bottom, uint32_t top) {
+sublist_t *sublist_init(list_t *list, int32_t bottom, int32_t top) {
     sublist_t *sublist = malloc(sizeof(sublist_t));
     sublist -> length = top - bottom;
     sublist -> dummy = top - bottom;
@@ -56901,7 +59298,7 @@ float bufferList_delete(bufferList_t *list, int32_t index) {
     while (index < 0) {index += list -> length;}
     index %= list -> length;
     float ret = list -> data[index];
-    for (uint32_t i = index; i < list -> length - 1 ; i++) {
+    for (int32_t i = index; i < list -> length - 1 ; i++) {
         list -> data[i] = list -> data[i + 1];
     }
     list -> length -= 1;
@@ -56914,14 +59311,14 @@ float bufferList_delete(bufferList_t *list, int32_t index) {
 }
 
 /* deletes many items from the list spanning from [indexMin] to [indexMax - 1] */
-void bufferList_delete_range(bufferList_t* list, uint32_t indexMin, uint32_t indexMax) {
+void bufferList_delete_range(bufferList_t* list, int32_t indexMin, int32_t indexMax) {
     if (indexMin > indexMax) {
-        uint32_t swap = indexMin;
+        int32_t swap = indexMin;
         indexMin = indexMax;
         indexMax = swap;
     }
     char zerod = 0; // edge case: "should've used list_clear"
-    uint32_t difference = (indexMax - indexMin);
+    int32_t difference = (indexMax - indexMin);
     list -> realLength = list -> length - difference;
     if (list -> realLength <= 1) {
         zerod = 1;
@@ -56929,10 +59326,10 @@ void bufferList_delete_range(bufferList_t* list, uint32_t indexMin, uint32_t ind
     }
     
     float *newData = malloc(list -> realLength * sizeof(float)); // no need to calloc we're gonna fill it all up anyway
-    for (uint32_t i = 0; i < indexMin; i++) {
+    for (int32_t i = 0; i < indexMin; i++) {
         newData[i] = list -> data[i];
     }
-    for (uint32_t i = indexMax; i < list -> length; i++) {
+    for (int32_t i = indexMax; i < list -> length; i++) {
         newData[i - difference] = list -> data[i];
     }
     list -> length = list -> realLength;
@@ -56944,7 +59341,7 @@ void bufferList_delete_range(bufferList_t* list, uint32_t indexMin, uint32_t ind
 
 /* returns the index of the first instance of the item in the list, returns -1 if not found (python) */
 int32_t bufferList_find(bufferList_t *list, float item) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (list -> data[i] == item) {
             return i;
         }
@@ -56954,7 +59351,7 @@ int32_t bufferList_find(bufferList_t *list, float item) {
 
 /* duplicate of list_find */
 int32_t bufferList_index(bufferList_t *list, float item) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (list -> data[i] == item) {
             return i;
         }
@@ -56963,9 +59360,9 @@ int32_t bufferList_index(bufferList_t *list, float item) {
 }
 
 /* counts how many instances of an item is found in the list */
-uint32_t bufferList_count(bufferList_t *list, float item) {
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < list -> length; i++) {
+int32_t bufferList_count(bufferList_t *list, float item) {
+    int32_t count = 0;
+    for (int32_t i = 0; i < list -> length; i++) {
         count += (list -> data[i] == item);
     }
     return count;
@@ -56973,7 +59370,7 @@ uint32_t bufferList_count(bufferList_t *list, float item) {
 
 /* deletes the first instance of the item from the list, returns the index the item was at, returns -1 and doesn't modify the list if not found (python but without ValueError) */
 int32_t bufferList_remove(bufferList_t *list, float item) {
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         if (list -> data[i] == item) {
             bufferList_delete(list, i);
             return i;
@@ -56986,10 +59383,10 @@ int32_t bufferList_remove(bufferList_t *list, float item) {
 void bufferList_copy(bufferList_t *dest, bufferList_t *src) {
     bufferList_free_lite(dest);
     dest -> data = calloc(src -> realLength, sizeof(float));
-    uint32_t len = src -> length;
+    int32_t len = src -> length;
     dest -> length = len;
     dest -> realLength = src -> realLength;
-    for (uint32_t i = 0; i < len; i++) {
+    for (int32_t i = 0; i < len; i++) {
         dest -> data[i] = src -> data[i];
     }
 }
@@ -57001,7 +59398,7 @@ void bufferList_print(bufferList_t *list) {
         printf("]\n");
         return;
     }
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         printf("%f", list -> data[i]);
         if (i == list -> length - 1) {
             printf("]\n");
@@ -57018,7 +59415,7 @@ void bufferList_print_emb(bufferList_t *list) {
         printf("]");
         return;
     }
-    for (uint32_t i = 0; i < list -> length; i++) {
+    for (int32_t i = 0; i < list -> length; i++) {
         printf("%f", list -> data[i]);
         if (i == list -> length - 1) {
             printf("]");
@@ -57063,7 +59460,12 @@ turtle_t turtle;
 #define STB_IMAGE_IMPLEMENTATION
 /* shader code */
 const char *turtleVertexShaderSource = 
+#ifdef OS_BROWSER
+"#version 300 es\n"
+"precision mediump float;\n"
+#else
 "#version 330 core\n"
+#endif /* OS_BROWSER */
 "layout(location = 0) in vec2 vPosition;\n"
 "layout(location = 1) in vec4 vColor;\n"
 "layout(location = 2) in vec3 textureCoordVert;\n"
@@ -57078,16 +59480,80 @@ const char *turtleVertexShaderSource =
 "}\0";
 
 const char *turtleFragmentShaderSource = 
+#ifdef OS_BROWSER
+"#version 300 es\n"
+"uniform mediump sampler2DArray textureImages;\n"
+"precision mediump float;\n"
+#else
 "#version 330 core\n"
 "uniform sampler2DArray textureImages;\n"
-"in vec4 shadeColor;\n;"
+#endif /* OS_BROWSER */
+"in vec4 shadeColor;\n"
 "in vec2 textureCoordFrag;\n"
 "in float textureIndex;\n"
 "out vec4 fragColor;\n"
 "void main() {\n"
-"     fragColor = texture(textureImages, vec3(textureCoordFrag, textureIndex)) * shadeColor + shadeColor * (1 / (1 + pow(2, 20 * textureIndex - 10)));\n"
+"    if (textureIndex > 0.5) {\n"
+"        fragColor = texture(textureImages, vec3(textureCoordFrag, textureIndex)) * shadeColor;\n"
+"    } else {\n"
+"        fragColor = shadeColor;\n"
+"    }\n"
 "}\0";
 #endif /* TURTLE_ENABLE_TEXTURES */
+
+/* special function that can be called prior to turtleInit - this function condenses the window creation code boilerplate */
+GLFWwindow *turtleCreateWindow(char *windowName) {
+    /* Initialise glfw */
+    if (!glfwInit()) {
+        return NULL;
+    }
+    glfwWindowHint(GLFW_SAMPLES, 4); // MSAA (Anti-Aliasing) with 4 samples (must be done before window is created (?))
+
+    #ifndef OS_BROWSER
+    /* Create a windowed mode window and its OpenGL context */
+    const GLFWvidmode *monitorSize = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    int32_t windowHeight = monitorSize -> height;
+    double optimizedScalingFactor = 0.8; // Set this number to 1 on windows and 0.8 on Ubuntu for maximum compatibility (fixes issue with incorrect stretching)
+    #ifdef OS_WINDOWS
+    optimizedScalingFactor = 1;
+    #endif
+    #ifdef OS_LINUX
+    optimizedScalingFactor = 0.8;
+    #endif
+    GLFWwindow *window = glfwCreateWindow(windowHeight * 16 / 9 * optimizedScalingFactor, windowHeight * optimizedScalingFactor, windowName, NULL, NULL);
+    #else
+    GLFWwindow *window = glfwCreateWindow(1920, 1080, windowName, NULL, NULL);
+    #endif /* OS_BROWSER */
+    if (!window) {
+        glfwTerminate();
+        return NULL;
+    }
+    glfwMakeContextCurrent(window);
+    #ifndef OS_BROWSER
+    glfwSetWindowSizeLimits(window, windowHeight * 16 / 9 * 0.4, windowHeight * 0.4, windowHeight * 16 / 9 * optimizedScalingFactor, windowHeight * optimizedScalingFactor);
+    #endif /* OS_BROWSER */
+    return window;
+}
+
+#ifdef TURTLE_ENABLE_TEXTURES
+/* special function that can be called prior to turtleInit - this function condenses the window creation code with icon boilerplate */
+GLFWwindow *turtleCreateWindowIcon(char *windowName, char *filename) {
+    GLFWwindow *window = turtleCreateWindow(windowName);
+    /* initialise logo */
+    GLFWimage icon;
+    int32_t iconChannels;
+    uint8_t *iconPixels = stbi_load(filename, &icon.width, &icon.height, &iconChannels, 4); // 4 color channels for RGBA
+    if (iconPixels != NULL) {
+        icon.pixels = iconPixels;
+        glfwSetWindowIcon(window, 1, &icon);
+        glfwPollEvents(); // update taskbar icon correctly on windows - https://github.com/glfw/glfw/issues/2753
+        free(iconPixels);
+    } else {
+        printf("Could not load thumbnail %s\n", filename);
+    }
+    return window;
+}
+#endif
 
 /* initializes the turtletools module */
 void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX, double topY) {
@@ -57096,12 +59562,14 @@ void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX,
     gladLoadGL();
     #endif /* TURTLE_ENABLE_TEXTURES */
     #ifdef TURTLE_ENABLE_TEXTURES
+    #ifndef OS_BROWSER
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         printf("could not initialise glad\n");
     }
     if (glGenVertexArrays == NULL) {
         printf("couldn't load openGL\n");
     }
+    #endif /* OS_BROWSER */
 
     /* set up shaders */
     uint32_t VAO;
@@ -57129,6 +59597,7 @@ void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX,
         glGetShaderInfoLog(vertexShader, 512, NULL, errorMessage);
         printf("Error compiling vertex shader\n");
         printf("%s\n", errorMessage);
+        return;
     }
     int32_t fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &turtleFragmentShaderSource, NULL);
@@ -57138,6 +59607,7 @@ void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX,
         glGetShaderInfoLog(fragmentShader, 512, NULL, errorMessage);
         printf("Error compiling fragment shader\n");
         printf("%s\n", errorMessage);
+        return;
     }
     int32_t shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
@@ -57148,6 +59618,7 @@ void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX,
         glGetShaderInfoLog(shaderProgram, 512, NULL, errorMessage);
         printf("Error linking shaders\n");
         printf("%s\n", errorMessage);
+        return;
     }
     
     glUseProgram(shaderProgram);
@@ -57219,6 +59690,15 @@ void turtleInit(GLFWwindow *window, double leftX, double bottomY, double rightX,
     glfwSetKeyCallback(window, keySense); // initiate mouse and keyboard detection
     glfwSetMouseButtonCallback(window, mouseSense);
     glfwSetScrollCallback(window, scrollSense);
+
+    /* adjust window position and size */
+    #ifdef OS_LINUX
+    glfwSetWindowPos(window, 0, 36);
+    #endif
+    #ifdef OS_WINDOWS
+    glfwSetWindowPos(window, 0, 31);
+    #endif
+    glfwSetWindowSize(window, turtle.screenbounds[1] * 16 / 9 * 0.865, turtle.screenbounds[1] * 0.85); // doing it this way ensures the window spawns in the top left of the monitor and fixes resizing limits
 }
 
 /* run this to set the bounds of the window in coordinates */
@@ -57683,7 +60163,6 @@ void turtleTextureRenderInternal(int32_t textureCode, double x1, double y1, doub
 }
 
 turtle_texture_t turtleTextureLoad(char *filename) {
-    /* determine encoding */
     /* load image */
     int width;
     int height;
@@ -57749,6 +60228,7 @@ turtle_texture_t turtleTextureLoadList(list_t *list, uint32_t width, uint32_t he
 }
 
 turtle_texture_t turtleTextureLoadListArrayInternal(list_t *list, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding) {
+    /* determine encoding */
     uint8_t stride = 0;
     uint32_t stb_encoding = 0;
     if (encoding == GL_RGB) {
@@ -57795,9 +60275,9 @@ turtle_texture_t turtleTextureLoadListArrayInternal(list_t *list, uint8_t *array
     turtle_texture_t texture = -1;
     char pointerValue[20];
     if (freeArrayFlag) {
-        sprintf(pointerValue, "0x%lX", (int64_t) list);
+        sprintf(pointerValue, "0x%llX", (uint64_t) list);
     } else {
-        sprintf(pointerValue, "0x%lX", (int64_t) array);
+        sprintf(pointerValue, "0x%llX", (uint64_t) array);
     }
     for (int32_t i = 4; i < turtle.textureList -> length; i += 4) {
         if (strcmp(turtle.textureList -> data[i].s, "") == 0) {
@@ -57850,6 +60330,104 @@ void turtleTexturePrint(turtle_texture_t texture) {
         printf("- Texture Height: NULL\n");
         printf("- Texture Channel: NULL\n");
     }
+}
+
+/* replace a texture with new data from a png, jpg, or bmp */
+int32_t turtleTextureReplace(turtle_texture_t texture, char *filename) {
+    /* load image */
+    int width;
+    int height;
+    int channels;
+    unsigned char *image = stbi_load(filename, &width, &height, &channels, 0);
+    if (image == NULL) {
+        printf("turtleTextureReplace: Could not load image %s\n", filename);
+        return -1;
+    }
+    uint32_t encoding = GL_RGB;
+    uint32_t stb_encoding = STBIR_RGB;
+    uint8_t stride = 3;
+    if (channels == 4) {
+        encoding = GL_RGBA;
+        stb_encoding = STBIR_RGBA;
+        stride = 4;
+    }
+    if (channels == 1) {
+        encoding = GL_RED;
+        stb_encoding = STBIR_1CHANNEL;
+        stride = 1;
+    }
+    unsigned char *resized = malloc(stride * turtle.textureWidth * turtle.textureHeight);
+    stbir_resize_uint8_linear(image, width, height, stride * width, resized, turtle.textureWidth, turtle.textureHeight, stride * turtle.textureWidth, stb_encoding);
+    free(image);
+    if (resized == NULL) {
+        printf("turtleTextureReplace: Could not resize image %s\n", filename);
+        return -1;
+    }
+    /* load to GPU */
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, texture / 4, turtle.textureWidth, turtle.textureHeight, 1, encoding, GL_UNSIGNED_BYTE, resized);
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+    free(resized);
+    return texture;
+}
+
+/* replace a texture with new data from an array - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
+int32_t turtleTextureReplaceArray(turtle_texture_t texture, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding) {
+    return turtleTextureReplaceListArrayInternal(texture, NULL, array, width, height, encoding);
+}
+
+/* replace a texture with new data from an list - supported encodings: GL_RGB, GL_RGBA, GL_BGR, GL_BGRA, GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA */
+int32_t turtleTextureReplaceList(turtle_texture_t texture, list_t *list, uint32_t width, uint32_t height, uint32_t encoding) {
+    return turtleTextureReplaceListArrayInternal(texture, list, NULL, width, height, encoding);
+}
+
+int32_t turtleTextureReplaceListArrayInternal(turtle_texture_t texture, list_t *list, uint8_t *array, uint32_t width, uint32_t height, uint32_t encoding) {
+    /* determine encoding */
+    uint8_t stride = 0;
+    uint32_t stb_encoding = 0;
+    if (encoding == GL_RGB) {
+        stride = 3;
+        stb_encoding = STBIR_RGB;
+    } else if (encoding == GL_BGR) {
+        stride = 3;
+        stb_encoding = STBIR_BGR;
+    } else if (encoding == GL_RGBA) {
+        stride = 4;
+        stb_encoding = STBIR_RGBA;
+    } else if (encoding == GL_BGRA) {
+        stride = 4;
+        stb_encoding = STBIR_BGRA;
+    } else if (encoding == GL_RED || encoding == GL_GREEN || encoding == GL_BLUE || encoding == GL_ALPHA) {
+        stride = 1;
+        stb_encoding = STBIR_1CHANNEL;
+    } else {
+        printf("turtleTextureReplaceListArrayInternal: Unsupported encoding %d\n", encoding);
+        return -1;
+    }
+    uint8_t freeArrayFlag = 0;
+    if (array == NULL) {
+        if (list == NULL) {
+            printf("turtleTextureReplaceListArrayInternal: both list and array are NULL\n");
+            return -1;
+        }
+        array = malloc(list -> length);
+        for (int32_t i = 0; i < list -> length; i++) {
+            array[i] = list -> data[i].b;
+        }
+        freeArrayFlag = 1;
+    }
+    unsigned char *resized = malloc(stride * turtle.textureWidth * turtle.textureHeight);
+    stbir_resize_uint8_linear(array, width, height, stride * width, resized, turtle.textureWidth, turtle.textureHeight, stride * turtle.textureWidth, stb_encoding);
+    if (freeArrayFlag) {
+        free(array);
+    }
+    if (resized == NULL) {
+        printf("turtleTextureReplaceListArrayInternal: Could not resize image\n");
+        return -1;
+    }
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, texture / 4, turtle.textureWidth, turtle.textureHeight, 1, encoding, GL_UNSIGNED_BYTE, resized);
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+    free(resized);
+    return texture;
 }
 
 int32_t turtleTextureUnload(turtle_texture_t texture) {
@@ -58138,7 +60716,7 @@ void turtleUpdate() {
     /* used to have a feature that only redrew the screen if there have been any changes from last frame, but it has been removed.
        opted to redraw every frame and not list_copy, an alternative is hashing the penPos list. An interesting idea for sure... for another time */
     int8_t changed = 0;
-    uint32_t len = turtle.penPos -> length;
+    int32_t len = turtle.penPos -> length;
     unitype *ren = turtle.penPos -> data;
     int8_t *renType = turtle.penPos -> type;
     changed = 1;
@@ -58177,17 +60755,11 @@ void turtleUpdate() {
         double yfact = 1.0 / ((turtle.bounds[3] - turtle.bounds[1]) / 2);
         double xcenter = (double) turtle.screenbounds[0] / turtle.initscreenbounds[0] - 1 - (turtle.bounds[0] + turtle.bounds[2]) / 2 * xfact;
         double ycenter = (double) turtle.screenbounds[1] / turtle.initscreenbounds[1] - 1 - (turtle.bounds[1] + turtle.bounds[3]) / 2 * yfact;
-        if (turtle.resizeMode == TURTLE_RESIZE_MODE_PAD) {
-            
-            if ((turtle.bounds[2] - turtle.bounds[0]) / (turtle.bounds[3] - turtle.bounds[1])) {
-
-            }
-        }
         double lastSize = -1;
         double lastPrez = -1;
         double precomputedLog = 5;
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        for (int32_t i = 0; i < (int32_t) len; i += 9) {
+        for (int32_t i = 0; i < len; i += 9) {
             if (renType[i] == 'd') {
                 switch (ren[i + 7].h) {
                 case 0: // penshape circle
@@ -58217,12 +60789,12 @@ void turtleUpdate() {
                 default:
                 break;
                 }
-                if (i + 18 < (int32_t) len && renType[i + 9] == 'd' && ren[i + 7].h < 64 && (ren[i + 7].h == 4 || ren[i + 7].h == 5 || (fabs(ren[i].d - ren[i + 9].d) > ren[i + 2].d / 2 || fabs(ren[i + 1].d - ren[i + 10].d) > ren[i + 2].d / 2))) { // tests for next point continuity and also ensures that the next point is at sufficiently different coordinates
+                if (i + 18 < len && renType[i + 9] == 'd' && ren[i + 7].h < 64 && (ren[i + 7].h == 4 || ren[i + 7].h == 5 || (fabs(ren[i].d - ren[i + 9].d) > ren[i + 2].d / 2 || fabs(ren[i + 1].d - ren[i + 10].d) > ren[i + 2].d / 2))) { // tests for next point continuity and also ensures that the next point is at sufficiently different coordinates
                     double dir = atan((ren[i + 9].d - ren[i].d) / (ren[i + 1].d - ren[i + 10].d));
                     double sinn = sin(dir + M_PI / 2);
                     double coss = cos(dir + M_PI / 2);
                     turtleQuadRenderInternal(ren[i].d + ren[i + 2].d * sinn, ren[i + 1].d - ren[i + 2].d * coss, ren[i + 9].d + ren[i + 2].d * sinn, ren[i + 10].d - ren[i + 2].d * coss, ren[i + 9].d - ren[i + 2].d * sinn, ren[i + 10].d + ren[i + 2].d * coss, ren[i].d - ren[i + 2].d * sinn, ren[i + 1].d + ren[i + 2].d * coss, ren[i + 3].d, ren[i + 4].d, ren[i + 5].d, ren[i + 6].d, xcenter, ycenter, xfact, yfact);
-                    if ((ren[i + 7].h == 4 || ren[i + 7].h == 5) && i + 18 < (int32_t) len && renType[i + 18] == 'd') {
+                    if ((ren[i + 7].h == 4 || ren[i + 7].h == 5) && i + 18 < len && renType[i + 18] == 'd') {
                         double dir2 = atan((ren[i + 18].d - ren[i + 9].d) / (ren[i + 10].d - ren[i + 19].d));
                         double sinn2 = sin(dir2 + M_PI / 2);
                         double coss2 = cos(dir2 + M_PI / 2);
@@ -58317,6 +60889,9 @@ void turtleUpdate() {
             glfwTerminate();
         }
     }
+    #ifdef OS_BROWSER
+    emscripten_sleep(0);
+    #endif /* OS_BROWSER */
 }
 
 /* keeps the window open while doing nothing else (from python turtleMainLoop()) */
@@ -58525,15 +61100,15 @@ int32_t turtleTextInit(const char *filename) {
     list_append(fontPointerInit, (unitype) (int32_t) (fontDataInit -> length), 'i'); // last pointer
     // list_print(fontDataInit);
     turtleText.fontData = malloc(sizeof(int32_t) * fontDataInit -> length); // convert lists to arrays (could be optimised cuz we already have the -> data arrays but who really cares this runs once)
-    for (uint32_t i = 0; i < fontDataInit -> length; i++) {
+    for (int32_t i = 0; i < fontDataInit -> length; i++) {
         turtleText.fontData[i] = fontDataInit -> data[i].i;
     }
     turtleText.fontPointer = malloc(sizeof(int32_t) * fontPointerInit -> length);
-    for (uint32_t i = 0; i < fontPointerInit -> length; i++) {
+    for (int32_t i = 0; i < fontPointerInit -> length; i++) {
         turtleText.fontPointer[i] = fontPointerInit -> data[i].i;
     }
     turtleText.supportedCharReference = malloc(sizeof(int32_t) * supportedCharReferenceInit -> length);
-    for (uint32_t i = 0; i < supportedCharReferenceInit -> length; i++) {
+    for (int32_t i = 0; i < supportedCharReferenceInit -> length; i++) {
         turtleText.supportedCharReference[i] = supportedCharReferenceInit -> data[i].i;
     }
 
@@ -58656,9 +61231,9 @@ double turtleTextGetLength(const uint32_t *text, int32_t textLength, double size
 
 /* gets the length of a formatted string in coordinates on the screen */
 double turtleTextGetStringLength(const char *str, double size) {
-    uint32_t len = strlen(str);
+    int32_t len = strlen(str);
     uint32_t converted[len];
-    for (uint32_t i = 0; i < len; i++) {
+    for (int32_t i = 0; i < len; i++) {
         converted[i] = (uint32_t) str[i];
     }
     return turtleTextGetLength(converted, len, size);
@@ -59521,7 +62096,7 @@ char *strins(char *dest, char *source, int32_t index) {
 char *strdel(char *dest, int32_t index, int32_t size) {
     int32_t len = strlen(dest);
     memmove(dest + index, dest + index + size, len - index - size);
-    for (uint32_t i = 0; i < size + 1; i++) {
+    for (int32_t i = 0; i < size + 1; i++) {
         dest[len - size + i] = '\0';
     }
     return dest;
@@ -59810,6 +62385,9 @@ int32_t tt_ribbonInitInternal(FILE *configFile, list_t *configList, int8_t fileE
         tt_enabled.turtleToolsEnabled = 1;
         tt_elements.all = list_init();
     }
+    tt_ribbon.element = TT_ELEMENT_RIBBON;
+    tt_ribbon.enabled = TT_ELEMENT_ENABLED;
+    tt_elementResetColor((void *) &tt_ribbon);
     /* set ribbon parameters */
     tt_ribbon.marginSize = (turtle.initbounds[3] - turtle.initbounds[1]) / 36.0; // number of pixels between different items in the ribbon (not affected by ribbonSize)
     tt_ribbon.mainselect[0] = -1;
@@ -59863,10 +62441,10 @@ int32_t tt_ribbonInitInternal(FILE *configFile, list_t *configList, int8_t fileE
         fclose(configFile);
     }
 
-    for (uint32_t i = 0; i < tt_ribbon.options -> length; i++) {
+    for (int32_t i = 0; i < tt_ribbon.options -> length; i++) {
         list_append(tt_ribbon.lengths, (unitype) turtleTextGetStringLength(tt_ribbon.options -> data[i].r -> data[0].s, 7 * tt_ribbon.ribbonSize), 'd');
         double max = 0;
-        for (uint32_t j = 1; j < tt_ribbon.options -> data[i].r -> length; j++) {
+        for (int32_t j = 1; j < tt_ribbon.options -> data[i].r -> length; j++) {
             double current = turtleTextGetStringLength(tt_ribbon.options -> data[i].r -> data[j].s, 7 * tt_ribbon.ribbonSize);
             if (current > max) {
                 max = current;
@@ -59880,47 +62458,47 @@ int32_t tt_ribbonInitInternal(FILE *configFile, list_t *configList, int8_t fileE
 
 /* render ribbon */
 void tt_ribbonUpdate() {
-    tt_setColor(TT_COLOR_SLOT_RIBBON_TOP);
+    tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_TOP]);
     turtleRectangle(tt_ribbon.bounds[0], tt_ribbon.bounds[3] - tt_ribbon.ribbonSize * 10, tt_ribbon.bounds[2], tt_ribbon.bounds[3]);
-    tt_setColor(TT_COLOR_TEXT_ALTERNATE);
+    tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_TEXT]);
     double cutoff = tt_ribbon.bounds[0] + tt_ribbon.marginSize;
     tt_ribbon.mainselect[0] = -1;
     tt_ribbon.subselect[0] = -1;
-    for (uint32_t i = 0; i < tt_ribbon.options -> length; i++) {
+    for (int32_t i = 0; i < tt_ribbon.options -> length; i++) {
         double prevCutoff = cutoff;
-        if (i == (uint32_t) tt_ribbon.mainselect[2]) {
+        if (i == tt_ribbon.mainselect[2]) {
             double xLeft = prevCutoff - tt_ribbon.marginSize / 2.0;
             double xRight = prevCutoff + tt_ribbon.lengths -> data[i * 2 + 1].d + tt_ribbon.marginSize / 2.0;
             double yDown = tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize - 15 * tt_ribbon.ribbonSize * (tt_ribbon.options -> data[i].r -> length - 1) - tt_ribbon.marginSize / 2.0;
-            tt_setColor(TT_COLOR_SLOT_RIBBON_DROPDOWN);
+            tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_DROPDOWN]);
             turtleRectangle(xLeft, tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize, xRight, yDown); // ribbon highlight
-            for (uint32_t j = 1; j < tt_ribbon.options -> data[i].r -> length; j++) {
-                if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_PRIORITY_RIBBON) {
+            for (int32_t j = 1; j < tt_ribbon.options -> data[i].r -> length; j++) {
+                if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_RIBBON) {
                     if (turtle.mouseY > tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize - 15 * tt_ribbon.ribbonSize * j - tt_ribbon.marginSize / 4.0 && turtle.mouseY < tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize && turtle.mouseX > xLeft && turtle.mouseX < xRight && tt_ribbon.subselect[0] == -1) {
-                        tt_setColor(TT_COLOR_SLOT_RIBBON_HOVER);
+                        tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_HOVER]);
                         turtleRectangle(xLeft, tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize - 15 * tt_ribbon.ribbonSize * (j - 1) - tt_ribbon.marginSize / 4.0, xRight, tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize - 15 * tt_ribbon.ribbonSize * j - tt_ribbon.marginSize / 3.0); // dropdown highlight
                         tt_ribbon.subselect[0] = j;
                     }
                 }
-                tt_setColor(TT_COLOR_TEXT_ALTERNATE);
+                tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_TEXT]);
                 turtleTextWriteUnicode(tt_ribbon.options -> data[i].r -> data[j].s, prevCutoff, tt_ribbon.bounds[3] - 5.5 * tt_ribbon.ribbonSize - j * 15 * tt_ribbon.ribbonSize, 7 * tt_ribbon.ribbonSize, 0);
             }
         }
         cutoff += tt_ribbon.lengths -> data[i * 2].d + tt_ribbon.marginSize;
-        if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_PRIORITY_RIBBON) {
+        if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_RIBBON) {
             if (turtle.mouseY > tt_ribbon.bounds[3] - 10 * tt_ribbon.ribbonSize && turtle.mouseY < tt_ribbon.bounds[3] && turtle.mouseX > tt_ribbon.bounds[0] + tt_ribbon.marginSize / 2.0 && turtle.mouseX < cutoff - tt_ribbon.marginSize / 2.0 && tt_ribbon.mainselect[0] == -1) { // -217, -195, -164
-                tt_setColor(TT_COLOR_SLOT_RIBBON_SELECT);
+                tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_SELECT]);
                 turtleRectangle(prevCutoff - tt_ribbon.marginSize / 2.0, tt_ribbon.bounds[3] - tt_ribbon.ribbonSize, cutoff - tt_ribbon.marginSize / 2.0, tt_ribbon.bounds[3] - 9 * tt_ribbon.ribbonSize); // render dropdown
                 tt_ribbon.mainselect[0] = i;
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_RIBBON;
+                tt_globals.elementLogicType = TT_ELEMENT_RIBBON;
             }
         }
-        tt_setColor(TT_COLOR_TEXT_ALTERNATE);
+        tt_setColor(tt_ribbon.color[TT_COLOR_SLOT_RIBBON_TEXT]);
         turtleTextWriteUnicode(tt_ribbon.options -> data[i].r -> data[0].s, prevCutoff, tt_ribbon.bounds[3] - 5.5 * tt_ribbon.ribbonSize, 7 * tt_ribbon.ribbonSize, 0);
     }
-    if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_PRIORITY_RIBBON) {
+    if (tt_globals.elementLogicTypeOld <= TT_ELEMENT_RIBBON) {
         if (tt_ribbon.mainselect[2] > -1) {
-            tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_RIBBON;
+            tt_globals.elementLogicType = TT_ELEMENT_RIBBON;
         }
         if (turtleMouseDown()) { // this is hideous
             if (tt_ribbon.mouseDown == 0) {
@@ -59936,7 +62514,7 @@ void tt_ribbonUpdate() {
                         tt_ribbon.mainselect[3] = -1;
                     } else {
                         tt_ribbon.mainselect[2] = tt_ribbon.mainselect[0];
-                        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_RIBBON;
+                        tt_globals.elementLogicType = TT_ELEMENT_RIBBON;
                     }
                 }
             }
@@ -59996,6 +62574,9 @@ int32_t tt_popupInitInternal(FILE *configFile, list_t *configList, int8_t fileEx
         tt_enabled.turtleToolsEnabled = 1;
         tt_elements.all = list_init();
     }
+    tt_popup.element = TT_ELEMENT_POPUP;
+    tt_popup.enabled = TT_ELEMENT_ENABLED;
+    tt_elementResetColor((void *) &tt_popup);
     tt_popup.output[0] = 0;
     tt_popup.output[1] = -1;
     tt_popup.mouseDown = 0;
@@ -60051,16 +62632,16 @@ int32_t tt_popupInitInternal(FILE *configFile, list_t *configList, int8_t fileEx
 /* render popup */
 void tt_popupUpdate() {
     if (turtle.close == 1) {
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_POPUP;
-        tt_setColor(TT_COLOR_SLOT_POPUP_BOX);
+        tt_globals.elementLogicType = TT_ELEMENT_POPUP;
+        tt_setColor(tt_popup.color[TT_COLOR_SLOT_POPUP_BOX]);
         turtleRectangle(tt_popup.minX, tt_popup.minY, tt_popup.maxX, tt_popup.maxY);
         double textX = tt_popup.minX + (tt_popup.maxX - tt_popup.minX) / 2;
         double textY = tt_popup.maxY - tt_popup.size * 2;
-        tt_setColor(TT_COLOR_TEXT_ALTERNATE);
+        tt_setColor(tt_popup.color[TT_COLOR_SLOT_POPUP_TEXT]);
         turtleTextWriteUnicode(tt_popup.message, textX, textY, tt_popup.size, 50);
         textY -= tt_popup.size * 4;
         double fullLength = 0;
-        for (uint32_t i = 0; i < tt_popup.options -> length; i++) {
+        for (int32_t i = 0; i < tt_popup.options -> length; i++) {
             fullLength += turtleTextGetStringLength(tt_popup.options -> data[i].s, tt_popup.size);
         }
         /* we have the length of the strings, now we pad with n + 1 padding regions */
@@ -60070,10 +62651,10 @@ void tt_popupUpdate() {
         if (!turtleMouseDown() && tt_popup.mouseDown == 1) {
             flagged = 1; // flagged for mouse misbehaviour
         }
-        for (uint32_t i = 0; i < tt_popup.options -> length; i++) {
+        for (int32_t i = 0; i < tt_popup.options -> length; i++) {
             double strLen = turtleTextGetStringLength(tt_popup.options -> data[i].s, tt_popup.size);
             if (turtle.mouseX > textX - tt_popup.size && turtle.mouseX < textX + strLen + tt_popup.size && turtle.mouseY > textY - tt_popup.size && turtle.mouseY < textY + tt_popup.size) {
-                tt_setColor(TT_COLOR_SLOT_POPUP_BUTTON_SELECT);
+                tt_setColor(tt_popup.color[TT_COLOR_SLOT_POPUP_BUTTON_SELECT]);
                 turtleRectangle(textX - tt_popup.size, textY - tt_popup.size, textX + tt_popup.size + strLen, textY + tt_popup.size);
                 if (turtleMouseDown()) {
                     if (tt_popup.mouseDown == 0) {
@@ -60081,7 +62662,7 @@ void tt_popupUpdate() {
                         if (tt_popup.output[0] == 0) {
                             tt_popup.output[1] = i;
                         }
-                        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+                        tt_globals.elementLogicType = TT_ELEMENT_NONE;
                     }
                 } else {
                     if (tt_popup.mouseDown == 1) {
@@ -60089,14 +62670,14 @@ void tt_popupUpdate() {
                         if (tt_popup.output[1] == i) {
                             tt_popup.output[0] = 1;
                         }
-                        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+                        tt_globals.elementLogicType = TT_ELEMENT_NONE;
                     }
                 }
             } else {
-                tt_setColor(TT_COLOR_SLOT_POPUP_BUTTON);
+                tt_setColor(tt_popup.color[TT_COLOR_SLOT_POPUP_BUTTON]);
                 turtleRectangle(textX - tt_popup.size, textY - tt_popup.size, textX + tt_popup.size + strLen, textY + tt_popup.size);
             }
-            tt_setColor(TT_COLOR_TEXT_ALTERNATE);
+            tt_setColor(tt_popup.color[TT_COLOR_SLOT_POPUP_TEXT]);
             turtleTextWriteUnicode(tt_popup.options -> data[i].s, textX, textY, tt_popup.size, 0);
             textX += strLen + padding;
         }
@@ -60104,7 +62685,7 @@ void tt_popupUpdate() {
             tt_popup.mouseDown = 0;
             tt_popup.output[0] = 0;
             tt_popup.output[1] = -1;
-            tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+            tt_globals.elementLogicType = TT_ELEMENT_NONE;
         }
     }
 }
@@ -60118,19 +62699,20 @@ void tt_popupFree() {
 tt_globals_t tt_globals;
 
 int32_t tt_color_default[] = {
-    /*       button                         switch                            dial                           slider                          scrollbar                      context                       dropdown                     textbox       */
-    TT_COLOR_TEXT_ALTERNATE,       TT_COLOR_TEXT_BASE,             TT_COLOR_TEXT_BASE,             TT_COLOR_TEXT_BASE,             0,                              TT_COLOR_TEXT_ALTERNATE,      TT_COLOR_TEXT_BASE,           TT_COLOR_TEXT_ALTERNATE,
-    TT_COLOR_COMPONENT,            TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_BASE,             TT_COLOR_COMPONENT_ALTERNATE,   TT_COLOR_COMPONENT_BASE,        TT_COLOR_COMPONENT_BASE,      TT_COLOR_TEXT_ALTERNATE,      TT_COLOR_COMPONENT_BASE,
-    TT_COLOR_COMPONENT_HIGHLIGHT,  TT_COLOR_COMPONENT_BASE,        TT_COLOR_BACKGROUND_BASE,       TT_COLOR_BACKGROUND_COMPLEMENT, TT_COLOR_COMPONENT_COMPLEMENT,  TT_COLOR_COMPONENT_HIGHLIGHT, TT_COLOR_COMPONENT_BASE,      TT_COLOR_TEXT_HIGHLIGHT,
-    TT_COLOR_TEXT_BASE,            TT_COLOR_COMPONENT_HIGHLIGHT,   0,                              0,                              TT_COLOR_BACKGROUND_ALTERNATE,  0,                            TT_COLOR_COMPONENT_HIGHLIGHT, TT_COLOR_TEXT_ALTERNATE,
-    TT_COLOR_COMPONENT_COMPLEMENT, TT_COLOR_BACKGROUND_ALTERNATE,  0,                              0,                              TT_COLOR_BACKGROUND_HIGHLIGHT,  0,                            TT_COLOR_COMPONENT_HIGHLIGHT, TT_COLOR_BLUE,
-    0,                             TT_COLOR_TERTIARY_BASE,         0,                              0,                              0,                              0,                            TT_COLOR_TEXT_ALTERNATE,      0,
-    0,                             0,                              0,                              0,                              0,                              0,                            0,                            0,
-    0,                             0,                              0,                              0,                              0,                              0,                            0,                            0,
+    /*         none                           button                         switch                            dial                           slider                          textbox                        dropdown                         scrollbar                      context                          ribbon                           popup               */
+    0,                              TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_BASE,             TT_COLOR_TEXT_BASE,             TT_COLOR_TEXT_BASE,             TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_BASE,             0,                              TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_ALTERNATE,        
+    0,                              TT_COLOR_COMPONENT,             TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_TEXT_BASE,             TT_COLOR_COMPONENT_ALTERNATE,   TT_COLOR_COMPONENT_BASE,        TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_COMPONENT_BASE,        TT_COLOR_COMPONENT_BASE,        TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_COMPONENT_ALTERNATE,   
+    0,                              TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_COMPONENT_BASE,        TT_COLOR_BACKGROUND_BASE,       TT_COLOR_BACKGROUND_COMPLEMENT, TT_COLOR_TEXT_HIGHLIGHT,        TT_COLOR_COMPONENT_BASE,        TT_COLOR_COMPONENT_COMPLEMENT,  TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_COMPONENT_HIGHLIGHT,   
+    0,                              TT_COLOR_TEXT_BASE,             TT_COLOR_COMPONENT_HIGHLIGHT,   0,                              0,                              TT_COLOR_TEXT_ALTERNATE,        TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_BACKGROUND_ALTERNATE,  0,                              TT_COLOR_COMPONENT,             TT_COLOR_COMPONENT,             
+    0,                              TT_COLOR_COMPONENT_COMPLEMENT,  TT_COLOR_BACKGROUND_ALTERNATE,  0,                              0,                              TT_COLOR_BLUE,                  TT_COLOR_COMPONENT_HIGHLIGHT,   TT_COLOR_BACKGROUND_HIGHLIGHT,  0,                              TT_COLOR_COMPONENT,             0,                              
+    0,                              0,                              TT_COLOR_TERTIARY_BASE,         0,                              0,                              0,                              TT_COLOR_TEXT_ALTERNATE,        0,                              0,                              0,                              0,                              
+    0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              
+    0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              0,                              
 };
 
-void tt_elementResetColor(void *elementp, int32_t elementType) {
-    for (uint32_t i = 0; i < 8; i++) {
+void tt_elementResetColor(void *elementp) {
+    int32_t elementType = ((tt_button_t *) elementp) -> element;
+    for (int32_t i = 0; i < 8; i++) {
         ((tt_button_t *) elementp) -> color[i] = tt_color_default[i * TT_NUMBER_OF_ELEMENTS + elementType];
     }
 }
@@ -60171,6 +62753,12 @@ int32_t tt_elementFree(void *elementp) {
     return 0;
 }
 
+void tt_hideAllElements() {
+    for (int32_t i = 0; i < tt_elements.all -> length; i++) {
+        ((tt_button_t *) tt_elements.all -> data[i].p) -> enabled = TT_ELEMENT_HIDE;
+    }
+}
+
 /* initialise UI elements */
 
 /* create a button */
@@ -60181,7 +62769,7 @@ tt_button_t *tt_buttonInit(char *label, int8_t *variable, double x, double y, do
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60189,12 +62777,13 @@ tt_button_t *tt_buttonInit(char *label, int8_t *variable, double x, double y, do
     tt_button_t *buttonp = calloc(1, sizeof(tt_button_t));
     buttonp -> element = TT_ELEMENT_BUTTON;
     buttonp -> enabled = TT_ELEMENT_ENABLED;
+    buttonp -> ignored = TT_ELEMENT_NOT_IGNORED;
     if (label == NULL) {
         memcpy(buttonp -> label, "", strlen("") + 1);
     } else {
         memcpy(buttonp -> label, label, strlen(label) + 1);
     }
-    tt_elementResetColor(buttonp, TT_ELEMENT_BUTTON);
+    tt_elementResetColor(buttonp);
     buttonp -> status = 0;
     buttonp -> x = x;
     buttonp -> y = y;
@@ -60223,7 +62812,7 @@ tt_switch_t *tt_switchInit(char *label, int8_t *variable, double x, double y, do
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60231,12 +62820,13 @@ tt_switch_t *tt_switchInit(char *label, int8_t *variable, double x, double y, do
     tt_switch_t *switchp = calloc(1, sizeof(tt_switch_t));
     switchp -> element = TT_ELEMENT_SWITCH;
     switchp -> enabled = TT_ELEMENT_ENABLED;
+    switchp -> ignored = TT_ELEMENT_NOT_IGNORED;
     if (label == NULL) {
         memcpy(switchp -> label, "", strlen("") + 1);
     } else {
         memcpy(switchp -> label, label, strlen(label) + 1);
     }
-    tt_elementResetColor(switchp, TT_ELEMENT_SWITCH);
+    tt_elementResetColor(switchp);
     switchp -> status = 0;
     switchp -> x = x;
     switchp -> y = y;
@@ -60262,7 +62852,7 @@ tt_dial_t *tt_dialInit(char *label, double *variable, tt_dial_scale_t scale, dou
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60270,12 +62860,13 @@ tt_dial_t *tt_dialInit(char *label, double *variable, tt_dial_scale_t scale, dou
     tt_dial_t *dialp = calloc(1, sizeof(tt_dial_t));
     dialp -> element = TT_ELEMENT_DIAL;
     dialp -> enabled = TT_ELEMENT_ENABLED;
+    dialp -> ignored = TT_ELEMENT_NOT_IGNORED;
     if (label == NULL) {
         memcpy(dialp -> label, "", strlen("") + 1);
     } else {
         memcpy(dialp -> label, label, strlen(label) + 1);
     }
-    tt_elementResetColor(dialp, TT_ELEMENT_DIAL);
+    tt_elementResetColor(dialp);
     dialp -> status[0] = 0;
     dialp -> scale = scale;
     dialp -> x = x;
@@ -60308,7 +62899,7 @@ tt_slider_t *tt_sliderInit(char *label, double *variable, tt_slider_type_t type,
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60316,12 +62907,13 @@ tt_slider_t *tt_sliderInit(char *label, double *variable, tt_slider_type_t type,
     tt_slider_t *sliderp = calloc(1, sizeof(tt_slider_t));
     sliderp -> element = TT_ELEMENT_SLIDER;
     sliderp -> enabled = TT_ELEMENT_ENABLED;
+    sliderp -> ignored = TT_ELEMENT_NOT_IGNORED;
     if (label == NULL) {
         memcpy(sliderp -> label, "", strlen("") + 1);
     } else {
         memcpy(sliderp -> label, label, strlen(label) + 1);
     }
-    tt_elementResetColor(sliderp, TT_ELEMENT_SLIDER);
+    tt_elementResetColor(sliderp);
     sliderp -> status = 0;
     sliderp -> type = type;
     sliderp -> align = align;
@@ -60349,6 +62941,124 @@ void tt_sliderFree(tt_slider_t *sliderp) {
     list_remove(tt_elements.sliders, (unitype) (void *) sliderp, 'p');
 }
 
+/* create a textbox */
+tt_textbox_t *tt_textboxInit(char *label, char *variable, int32_t maxCharacters, double x, double y, double size, double length) {
+    if (tt_enabled.textboxEnabled == 0) {
+        turtle.unicodeCallback = tt_textboxUnicodeCallback;
+        turtle.keyCallback = tt_textboxKeyCallback;
+        tt_enabled.textboxEnabled = 1;
+        tt_elements.textboxes = list_init();
+    }
+    if (tt_enabled.turtleToolsEnabled == 0) {
+        tt_enabled.turtleToolsEnabled = 1;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
+        tt_globals.elementLogicIndex = -1;
+        tt_globals.elementLogicTemp = -1;
+        tt_elements.all = list_init();
+    }
+    tt_textbox_t *textboxp = calloc(1, sizeof(tt_textbox_t));
+    textboxp -> element = TT_ELEMENT_TEXTBOX;
+    textboxp -> enabled = TT_ELEMENT_ENABLED;
+    textboxp -> ignored = TT_ELEMENT_NOT_IGNORED;
+    if (label == NULL) {
+        memcpy(textboxp -> label, "", strlen("") + 1);
+    } else {
+        memcpy(textboxp -> label, label, strlen(label) + 1);
+    }
+    tt_elementResetColor(textboxp);
+    textboxp -> status = 0;
+    textboxp -> align = TT_TEXTBOX_ALIGN_LEFT;
+    textboxp -> x = x;
+    textboxp -> y = y;
+    textboxp -> size = size;
+    textboxp -> length = length;
+    if (variable == NULL) {
+        textboxp -> text = calloc(maxCharacters + 5, 1);
+    } else {
+        textboxp -> text = variable;
+    }
+    textboxp -> maxCharacters = maxCharacters;
+    textboxp -> editIndex = 0;
+    textboxp -> lastKey = 0;
+    textboxp -> keyTimeout = 0;
+    textboxp -> initialKeyTimeout = 48;
+    textboxp -> heldKeyTimeout = 2;
+    textboxp -> renderPixelOffset = 0;
+    textboxp -> renderStartingIndex = 0;
+    textboxp -> renderNumCharacters = 0;
+    list_append(tt_elements.textboxes, (unitype) (void *) textboxp, 'p');
+    list_append(tt_elements.all, (unitype) (void *) textboxp, 'l');
+    textboxp -> whitelist = NULL;
+    textboxp -> blacklist = NULL;
+    return textboxp;
+}
+
+void tt_textboxFree(tt_textbox_t *textboxp) {
+    list_remove(tt_elements.all, (unitype) (uint64_t) textboxp, 'l');
+    list_remove(tt_elements.textboxes, (unitype) (void *) textboxp, 'p');
+}
+
+void tt_dropdownCalculateMax(tt_dropdown_t *dropdownp) {
+    dropdownp -> maxXfactor = 0;
+    for (int32_t i = 0; i < dropdownp -> options -> length; i++) {
+        double stringLength = turtleTextGetStringLength(dropdownp -> options -> data[i].s, dropdownp -> size - 1);
+        if (stringLength > dropdownp -> maxXfactor) {
+            dropdownp -> maxXfactor = stringLength;
+        }
+    }
+}
+
+/* create a dropdown - use a list of strings for options */
+tt_dropdown_t *tt_dropdownInit(char *label, list_t *options, int32_t *variable, tt_dropdown_align_t align, double x, double y, double size) {
+    if (tt_enabled.dropdownEnabled == 0) {
+        tt_enabled.dropdownEnabled = 1;
+        tt_elements.dropdowns = list_init();
+    }
+    if (tt_enabled.turtleToolsEnabled == 0) {
+        tt_enabled.turtleToolsEnabled = 1;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
+        tt_globals.elementLogicIndex = -1;
+        tt_globals.elementLogicTemp = -1;
+        tt_elements.all = list_init();
+    }
+    tt_dropdown_t *dropdownp = calloc(1, sizeof(tt_dropdown_t));
+    dropdownp -> element = TT_ELEMENT_DROPDOWN;
+    dropdownp -> enabled = TT_ELEMENT_ENABLED;
+    dropdownp -> ignored = TT_ELEMENT_NOT_IGNORED;
+    if (label == NULL) {
+        memcpy(dropdownp -> label, "", strlen("") + 1);
+    } else {
+        memcpy(dropdownp -> label, label, strlen(label) + 1);
+    }
+    tt_elementResetColor(dropdownp);
+    dropdownp -> options = options;
+    if (variable == NULL) {
+        dropdownp -> index = 0;
+    } else {
+        dropdownp -> index = *variable;
+    }
+    dropdownp -> value = dropdownp -> index;
+    dropdownp -> status = 0;
+    dropdownp -> align = align;
+    dropdownp -> direction = TT_DROPDOWN_DIRECTION_AUTO;
+    dropdownp -> autoLowerBound = turtle.initbounds[1];
+    dropdownp -> autoUpperBound = turtle.initbounds[3];
+    dropdownp -> x = x;
+    dropdownp -> y = y;
+    dropdownp -> size = size;
+    dropdownp -> variable = variable;
+    tt_dropdownCalculateMax(dropdownp);
+    list_append(tt_elements.dropdowns, (unitype) (void *) dropdownp, 'p');
+    list_append(tt_elements.all, (unitype) (void *) dropdownp, 'l');
+    return dropdownp;
+}
+
+void tt_dropdownFree(tt_dropdown_t *dropdownp) {
+    list_free(dropdownp -> options);
+    list_remove(tt_elements.all, (unitype) (uint64_t) dropdownp, 'l');
+    list_remove(tt_elements.dropdowns, (unitype) (void *) dropdownp, 'p');
+}
+
 /* create a scrollbar */
 tt_scrollbar_t *tt_scrollbarInit(double *variable, tt_scrollbar_type_t type, double x, double y, double size, double length, double barPercentage) {
     if (tt_enabled.scrollbarEnabled == 0) {
@@ -60357,7 +63067,7 @@ tt_scrollbar_t *tt_scrollbarInit(double *variable, tt_scrollbar_type_t type, dou
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60365,7 +63075,8 @@ tt_scrollbar_t *tt_scrollbarInit(double *variable, tt_scrollbar_type_t type, dou
     tt_scrollbar_t *scrollbarp = calloc(1, sizeof(tt_scrollbar_t));
     scrollbarp -> element = TT_ELEMENT_SCROLLBAR;
     scrollbarp -> enabled = TT_ELEMENT_ENABLED;
-    tt_elementResetColor(scrollbarp, TT_ELEMENT_SCROLLBAR);
+    scrollbarp -> ignored = TT_ELEMENT_NOT_IGNORED;
+    tt_elementResetColor(scrollbarp);
     scrollbarp -> status = 0;
     scrollbarp -> type = type;
     scrollbarp -> x = x;
@@ -60386,7 +63097,7 @@ void tt_scrollbarFree(tt_scrollbar_t *scrollbarp) {
 
 void tt_contextCalculateMax(tt_context_t *contextp) {
     contextp -> maxXfactor = 0;
-    for (uint32_t i = 0; i < contextp -> options -> length; i++) {
+    for (int32_t i = 0; i < contextp -> options -> length; i++) {
         double stringLength = turtleTextGetStringLength(contextp -> options -> data[i].s, contextp -> size - 1);
         if (stringLength > contextp -> maxXfactor) {
             contextp -> maxXfactor = stringLength;
@@ -60394,6 +63105,7 @@ void tt_contextCalculateMax(tt_context_t *contextp) {
     }
 }
 
+/* create a context menu */
 tt_context_t *tt_contextInit(list_t *options, int32_t *variable, double x, double y, double size) {
     if (tt_enabled.contextEnabled == 0) {
         tt_enabled.contextEnabled = 1;
@@ -60401,7 +63113,7 @@ tt_context_t *tt_contextInit(list_t *options, int32_t *variable, double x, doubl
     }
     if (tt_enabled.turtleToolsEnabled == 0) {
         tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+        tt_globals.elementLogicType = TT_ELEMENT_NONE;
         tt_globals.elementLogicIndex = -1;
         tt_globals.elementLogicTemp = -1;
         tt_elements.all = list_init();
@@ -60409,7 +63121,8 @@ tt_context_t *tt_contextInit(list_t *options, int32_t *variable, double x, doubl
     tt_context_t *contextp = calloc(1, sizeof(tt_context_t));
     contextp -> element = TT_ELEMENT_CONTEXT;
     contextp -> enabled = TT_ELEMENT_ENABLED;
-    tt_elementResetColor(contextp, TT_ELEMENT_CONTEXT);
+    contextp -> ignored = TT_ELEMENT_NOT_IGNORED;
+    tt_elementResetColor(contextp);
     contextp -> options = options;
     contextp -> index = -1;
     contextp -> value = -1;
@@ -60423,6 +63136,8 @@ tt_context_t *tt_contextInit(list_t *options, int32_t *variable, double x, doubl
     contextp -> variable = variable;
     tt_contextCalculateMax(contextp);
     contextp -> direction = TT_CONTEXT_DIRECTION_AUTO;
+    contextp -> autoLowerBound = turtle.initbounds[1];
+    contextp -> autoRightBound = turtle.initbounds[2];
     list_append(tt_elements.contexts, (unitype) (void *) contextp, 'p');
     list_append(tt_elements.all, (unitype) (void *) contextp, 'l');
     return contextp;
@@ -60432,118 +63147,6 @@ void tt_contextFree(tt_context_t *contextp) {
     list_free(contextp -> options);
     list_remove(tt_elements.all, (unitype) (uint64_t) contextp, 'l');
     list_remove(tt_elements.contexts, (unitype) (void *) contextp, 'p');
-}
-
-void tt_dropdownCalculateMax(tt_dropdown_t *dropdownp) {
-    dropdownp -> maxXfactor = 0;
-    for (uint32_t i = 0; i < dropdownp -> options -> length; i++) {
-        double stringLength = turtleTextGetStringLength(dropdownp -> options -> data[i].s, dropdownp -> size - 1);
-        if (stringLength > dropdownp -> maxXfactor) {
-            dropdownp -> maxXfactor = stringLength;
-        }
-    }
-}
-
-/* create a dropdown - use a list of strings for options */
-tt_dropdown_t *tt_dropdownInit(char *label, list_t *options, int32_t *variable, tt_dropdown_align_t align, double x, double y, double size) {
-    if (tt_enabled.dropdownEnabled == 0) {
-        tt_enabled.dropdownEnabled = 1;
-        tt_elements.dropdowns = list_init();
-    }
-    if (tt_enabled.turtleToolsEnabled == 0) {
-        tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
-        tt_globals.elementLogicIndex = -1;
-        tt_globals.elementLogicTemp = -1;
-        tt_elements.all = list_init();
-    }
-    tt_dropdown_t *dropdownp = calloc(1, sizeof(tt_dropdown_t));
-    dropdownp -> element = TT_ELEMENT_DROPDOWN;
-    dropdownp -> enabled = TT_ELEMENT_ENABLED;
-    if (label == NULL) {
-        memcpy(dropdownp -> label, "", strlen("") + 1);
-    } else {
-        memcpy(dropdownp -> label, label, strlen(label) + 1);
-    }
-    tt_elementResetColor(dropdownp, TT_ELEMENT_DROPDOWN);
-    dropdownp -> options = options;
-    if (variable == NULL) {
-        dropdownp -> index = 0;
-    } else {
-        dropdownp -> index = *variable;
-    }
-    dropdownp -> value = dropdownp -> index;
-    dropdownp -> status = 0;
-    dropdownp -> align = align;
-    dropdownp -> direction = TT_DROPDOWN_DIRECTION_AUTO;
-    dropdownp -> x = x;
-    dropdownp -> y = y;
-    dropdownp -> size = size;
-    dropdownp -> variable = variable;
-    tt_dropdownCalculateMax(dropdownp);
-    list_append(tt_elements.dropdowns, (unitype) (void *) dropdownp, 'p');
-    list_append(tt_elements.all, (unitype) (void *) dropdownp, 'l');
-    return dropdownp;
-}
-
-void tt_dropdownFree(tt_dropdown_t *dropdownp) {
-    list_free(dropdownp -> options);
-    list_remove(tt_elements.all, (unitype) (uint64_t) dropdownp, 'l');
-    list_remove(tt_elements.dropdowns, (unitype) (void *) dropdownp, 'p');
-}
-
-/* create a textbox */
-tt_textbox_t *tt_textboxInit(char *label, char *variable, uint32_t maxCharacters, double x, double y, double size, double length) {
-    if (tt_enabled.textboxEnabled == 0) {
-        turtle.unicodeCallback = tt_textboxUnicodeCallback;
-        turtle.keyCallback = tt_textboxKeyCallback;
-        tt_enabled.textboxEnabled = 1;
-        tt_elements.textboxes = list_init();
-    }
-    if (tt_enabled.turtleToolsEnabled == 0) {
-        tt_enabled.turtleToolsEnabled = 1;
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
-        tt_globals.elementLogicIndex = -1;
-        tt_globals.elementLogicTemp = -1;
-        tt_elements.all = list_init();
-    }
-    tt_textbox_t *textboxp = calloc(1, sizeof(tt_textbox_t));
-    textboxp -> element = TT_ELEMENT_TEXTBOX;
-    textboxp -> enabled = TT_ELEMENT_ENABLED;
-    if (label == NULL) {
-        memcpy(textboxp -> label, "", strlen("") + 1);
-    } else {
-        memcpy(textboxp -> label, label, strlen(label) + 1);
-    }
-    tt_elementResetColor(textboxp, TT_ELEMENT_TEXTBOX);
-    textboxp -> status = 0;
-    textboxp -> align = TT_TEXTBOX_ALIGN_LEFT;
-    textboxp -> x = x;
-    textboxp -> y = y;
-    textboxp -> size = size;
-    textboxp -> length = length;
-    if (variable == NULL) {
-        textboxp -> text = calloc(maxCharacters + 5, 1);
-    } else {
-        textboxp -> text = variable;
-    }
-    textboxp -> maxCharacters = maxCharacters;
-    textboxp -> editIndex = 0;
-    textboxp -> lastKey = 0;
-    textboxp -> keyTimeout = 0;
-    textboxp -> renderPixelOffset = 0;
-    textboxp -> renderStartingIndex = 0;
-    textboxp -> renderNumCharacters = 0;
-    list_append(tt_elements.textboxes, (unitype) (void *) textboxp, 'p');
-    list_append(tt_elements.all, (unitype) (void *) textboxp, 'l');
-    textboxp -> whitelist = NULL;
-    textboxp -> blacklist = NULL;
-    return textboxp;
-}
-
-void tt_textboxFree(tt_textbox_t *textboxp) {
-    list_remove(tt_elements.all, (unitype) (uint64_t) textboxp, 'l');
-    list_remove(tt_elements.textboxes, (unitype) (void *) textboxp, 'p');
 }
 
 void tt_buttonUpdate(tt_button_t *buttonp) {
@@ -60604,7 +63207,7 @@ void tt_buttonUpdate(tt_button_t *buttonp) {
     }
     turtleTextWriteUnicode(buttonp -> label, (buttonLeftX + buttonRightX) / 2, buttonY, buttonp -> size - 1, 50);
     /* mouse */
-    if (buttonp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_BUTTON || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_BUTTON && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
+    if (buttonp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_BUTTON || (tt_globals.elementLogicTypeOld == TT_ELEMENT_BUTTON && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
         if (turtleMouseDown()) {
             if (buttonp -> status == 2) {
                 buttonp -> status = 1;
@@ -60616,7 +63219,7 @@ void tt_buttonUpdate(tt_button_t *buttonp) {
             if (buttonp -> shape == TT_BUTTON_SHAPE_CIRCLE) {
                 if ((turtle.mouseX - (buttonLeftX + buttonRightX) / 2) * (turtle.mouseX - (buttonLeftX + buttonRightX) / 2) + (turtle.mouseY - buttonY) * (turtle.mouseY - buttonY) < buttonWidth * buttonWidth / 4) {
                     buttonp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_BUTTON;
+                    tt_globals.elementLogicType = TT_ELEMENT_BUTTON;
                     tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
                 } else {
                     buttonp -> status = 0;
@@ -60624,7 +63227,7 @@ void tt_buttonUpdate(tt_button_t *buttonp) {
             } else {
                 if (turtle.mouseX > buttonLeftX && turtle.mouseX < buttonRightX && turtle.mouseY > buttonY - buttonHeight / 2 && turtle.mouseY < buttonY + buttonHeight / 2) {
                     buttonp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_BUTTON;
+                    tt_globals.elementLogicType = TT_ELEMENT_BUTTON;
                     tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
                 } else {
                     buttonp -> status = 0;
@@ -60778,7 +63381,7 @@ void tt_switchUpdate(tt_switch_t *switchp) {
         turtleTextWriteUnicode(switchp -> label, switchX + switchp -> size, switchY, switchp -> size - 1, 0);
     }
     /* mouse */
-    if (switchp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_SWITCH || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_SWITCH && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
+    if (switchp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_SWITCH || (tt_globals.elementLogicTypeOld == TT_ELEMENT_SWITCH && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
         if (turtleMouseDown()) {
             if (switchp -> status < 0) {
                 switchp -> status *= -1;
@@ -60786,7 +63389,7 @@ void tt_switchUpdate(tt_switch_t *switchp) {
         } else {
             if (turtle.mouseX > switchClickLeft && turtle.mouseX < switchClickRight && turtle.mouseY > switchClickDown && turtle.mouseY < switchClickUp) {
                 switchp -> status = -1;
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_SWITCH;
+                tt_globals.elementLogicType = TT_ELEMENT_SWITCH;
                 tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
             } else {
                 switchp -> status = 0;
@@ -60847,7 +63450,7 @@ void tt_dialUpdate(tt_dial_t *dialp) {
     tt_setColor(dialp -> color[TT_COLOR_SLOT_DIAL]);
     turtlePenSize(1);
     turtlePenDown();
-    double dialAngle;
+    double dialAngle = 0.0;
     if (dialp -> scale == TT_DIAL_SCALE_LOG) {
         dialAngle = pow(361, (dialp -> value - dialp -> range[0]) / (dialp -> range[1] - dialp -> range[0])) - 1;
     } else if (dialp -> scale == TT_DIAL_SCALE_LINEAR) {
@@ -60858,7 +63461,7 @@ void tt_dialUpdate(tt_dial_t *dialp) {
     turtleGoto(dialX + sin(dialAngle / 57.2958) * dialp -> size, dialY + cos(dialAngle / 57.2958) * dialp -> size);
     turtlePenUp();
     /* mouse */
-    if (dialp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_DIAL || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_DIAL && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
+    if (dialp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_DIAL || (tt_globals.elementLogicTypeOld == TT_ELEMENT_DIAL && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
         if (turtleMouseDown()) {
             if (dialp -> status[0] < 0) {
                 tt_globals.dialAnchorX = dialX;
@@ -60873,7 +63476,7 @@ void tt_dialUpdate(tt_dial_t *dialp) {
         } else {
             if (turtle.mouseX > dialX - dialp -> size && turtle.mouseX < dialX + dialp -> size && turtle.mouseY > dialY - dialp -> size && turtle.mouseY < dialY + dialp -> size) {
                 dialp -> status[0] = -1;
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_DIAL;
+                tt_globals.elementLogicType = TT_ELEMENT_DIAL;
                 tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
             } else {
                 dialp -> status[0] = 0;
@@ -60916,11 +63519,11 @@ void tt_sliderUpdate(tt_slider_t *sliderp) {
     if (sliderp -> enabled == TT_ELEMENT_HIDE) {
         return;
     }
-    double sliderXLeft;
-    double sliderYLeft;
-    double sliderXRight;
-    double sliderYRight;
-    double sliderAlignFactor;
+    double sliderXLeft = 0;
+    double sliderYLeft = 0;
+    double sliderXRight = 0;
+    double sliderYRight = 0;
+    double sliderAlignFactor = 0;
     double sliderOffsetXFactor = 0;
     double sliderOffsetYFactor = 0;
     double sliderOffsetXFactorSmall = 0;
@@ -61008,7 +63611,7 @@ void tt_sliderUpdate(tt_slider_t *sliderp) {
     turtlePenDown();
     turtlePenUp();
     /* mouse */
-    if (sliderp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_SLIDER || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_SLIDER && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
+    if (sliderp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_SLIDER || (tt_globals.elementLogicTypeOld == TT_ELEMENT_SLIDER && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
         if (turtleMouseDown()) {
             if (sliderp -> status < 0) {
                 sliderp -> status *= -1;
@@ -61020,7 +63623,7 @@ void tt_sliderUpdate(tt_slider_t *sliderp) {
         } else {
             if (turtle.mouseX > sliderXLeft - sliderp -> size * 0.6 && turtle.mouseX < sliderXRight + sliderp -> size * 0.6 && turtle.mouseY > sliderYLeft - sliderp -> size * 0.6 && turtle.mouseY < sliderYRight + sliderp -> size * 0.6) {
                 sliderp -> status = -1;
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_SLIDER;
+                tt_globals.elementLogicType = TT_ELEMENT_SLIDER;
                 tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
             } else {
                 sliderp -> status = 0;
@@ -61069,393 +63672,6 @@ void tt_sliderUpdate(tt_slider_t *sliderp) {
     }
     if (sliderp -> variable != NULL) {
         *sliderp -> variable = sliderp -> value;
-    }
-}
-
-/*
-scrollbar range of motion (coordinates):
-scrollbar.length * (1 - scrollbar.barPercentage / 100)
-tip: try to match the ratio of visible content to the scrollbar's barPercentage - if half of the content can be shown on one screen then make the barPercentage 50
-*/
-void tt_scrollbarUpdate(tt_scrollbar_t *scrollbarp) {
-    if (scrollbarp -> variable != NULL) {
-        scrollbarp -> value = *scrollbarp -> variable;
-    }
-    if (scrollbarp -> enabled == TT_ELEMENT_HIDE) {
-        return;
-    }
-    if (scrollbarp -> type == TT_SCROLLBAR_TYPE_HORIZONTAL) {
-        double scrollbarLeft = scrollbarp -> x - scrollbarp -> length / 2;
-        double scrollbarRight = scrollbarp -> x + scrollbarp -> length / 2;
-        double dragLeft = scrollbarLeft + scrollbarp -> value / 100 * (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100));
-        double dragRight = dragLeft + (scrollbarp -> length * scrollbarp -> barPercentage / 100);
-        turtlePenSize(scrollbarp -> size * 1);
-        tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BASE]);
-        turtleGoto(scrollbarLeft, scrollbarp -> y);
-        turtlePenDown();
-        turtleGoto(scrollbarRight, scrollbarp -> y);
-        turtlePenUp();
-        turtlePenSize(scrollbarp -> size * 0.8);
-        if (scrollbarp -> status == -1 && turtle.mouseX > dragLeft - scrollbarp -> size * 0.4 && turtle.mouseX < dragRight + scrollbarp -> size * 0.4) {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_HOVER]);
-        } else if (scrollbarp -> status > 0) {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_CLICKED]);
-        } else {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BAR]);
-        }
-        turtleGoto(dragLeft, scrollbarp -> y);
-        turtlePenDown();
-        turtleGoto(dragRight, scrollbarp -> y);
-        turtlePenUp();
-        if (scrollbarp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_SCROLLBAR || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_SCROLLBAR && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || scrollbarp -> status > 0)) {
-            if (scrollbarp -> status == 2) {
-                tt_globals.barAnchor = turtle.mouseX - dragLeft;
-                scrollbarp -> status = 1;
-            }
-            if (turtleMouseDown()) {
-                if (scrollbarp -> status < 0) {
-                    if (turtle.mouseX > dragLeft - scrollbarp -> size * 0.4 && turtle.mouseX < dragRight + scrollbarp -> size * 0.4) {
-                        tt_globals.barAnchor = turtle.mouseX - dragLeft;
-                    } else {
-                        tt_globals.barAnchor = (scrollbarp -> length * scrollbarp -> barPercentage / 100) / 2;
-                        scrollbarp -> status = -2;
-                    }
-                    scrollbarp -> status *= -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_HIGHEST;
-                    tt_globals.elementLogicIndex = TT_ELEMENT_PRIORITY_SCROLLBAR; // subverting expectations
-                }
-            } else {
-                if (turtle.mouseY > scrollbarp -> y - scrollbarp -> size * 0.5 && turtle.mouseY < scrollbarp -> y + scrollbarp -> size * 0.5 && turtle.mouseX < scrollbarRight && turtle.mouseX > scrollbarLeft) {
-                    scrollbarp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_SCROLLBAR;
-                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
-                } else {
-                    scrollbarp -> status = 0;
-                }
-            }
-            if (scrollbarp -> status > 0) {
-                scrollbarp -> value = (turtle.mouseX - scrollbarLeft - tt_globals.barAnchor) / (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100)) * 100;
-                if (scrollbarp -> value < 0) {
-                    scrollbarp -> value = 0;
-                }
-                if (scrollbarp -> value > 100) {
-                    scrollbarp -> value = 100;
-                }
-            }
-        } else {
-            scrollbarp -> status = 0;
-        }
-    } else if (scrollbarp -> type == TT_SCROLLBAR_TYPE_VERTICAL) {
-        double scrollbarTop = scrollbarp -> y + scrollbarp -> length / 2;
-        double scrollbarBottom = scrollbarp -> y - scrollbarp -> length / 2;
-        double dragTop = scrollbarTop - scrollbarp -> value / 100 * (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100));
-        double dragBottom = dragTop - (scrollbarp -> length * scrollbarp -> barPercentage / 100);
-        turtlePenSize(scrollbarp -> size * 1);
-        tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BASE]);
-        turtleGoto(scrollbarp -> x, scrollbarTop);
-        turtlePenDown();
-        turtleGoto(scrollbarp -> x, scrollbarBottom);
-        turtlePenUp();
-        turtlePenSize(scrollbarp -> size * 0.8);
-        if (scrollbarp -> status == -1 && turtle.mouseY > dragBottom - scrollbarp -> size * 0.4 && turtle.mouseY < dragTop + scrollbarp -> size * 0.4) {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_HOVER]);
-        } else if (scrollbarp -> status > 0) {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_CLICKED]);
-        } else {
-            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BAR]);
-        }
-        turtleGoto(scrollbarp -> x, dragTop);
-        turtlePenDown();
-        turtleGoto(scrollbarp -> x, dragBottom);
-        turtlePenUp();
-        /* mouse */
-        if (scrollbarp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_SCROLLBAR || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_SCROLLBAR && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || scrollbarp -> status > 0)) {
-            if (scrollbarp -> status == 2) {
-                tt_globals.barAnchor = dragTop - turtle.mouseY;
-                scrollbarp -> status = 1;
-            }
-            if (turtleMouseDown()) {
-                if (scrollbarp -> status < 0) {
-                    if (turtle.mouseY > dragBottom - scrollbarp -> size * 0.4 && turtle.mouseY < dragTop + scrollbarp -> size * 0.4) {
-                        tt_globals.barAnchor = dragTop - turtle.mouseY;
-                    } else {
-                        tt_globals.barAnchor = (scrollbarp -> length * scrollbarp -> barPercentage / 100) / 2;
-                        scrollbarp -> status = -2;
-                    }
-                    scrollbarp -> status *= -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_HIGHEST;
-                    tt_globals.elementLogicIndex = TT_ELEMENT_PRIORITY_SCROLLBAR; // subverting expectations
-                }
-            } else {
-                if (turtle.mouseX > scrollbarp -> x - scrollbarp -> size * 0.5 && turtle.mouseX < scrollbarp -> x + scrollbarp -> size * 0.5 && turtle.mouseY > scrollbarBottom && turtle.mouseY < scrollbarTop) {
-                    scrollbarp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_SCROLLBAR;
-                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
-                } else {
-                    scrollbarp -> status = 0;
-                }
-            }
-            if (scrollbarp -> status > 0) {
-                scrollbarp -> value = (scrollbarTop - turtle.mouseY - tt_globals.barAnchor) / (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100)) * 100;
-                if (scrollbarp -> value < 0) {
-                    scrollbarp -> value = 0;
-                }
-                if (scrollbarp -> value > 100) {
-                    scrollbarp -> value = 100;
-                }
-            }
-        } else {
-            scrollbarp -> status = 0;
-        }
-    }
-    if (scrollbarp -> variable != NULL) {
-        *scrollbarp -> variable = scrollbarp -> value;
-    }
-}
-
-void tt_contextUpdate(tt_context_t *contextp) {
-    if (contextp -> variable != NULL) {
-        contextp -> index = *contextp -> variable;
-        contextp -> value = *contextp -> variable;
-    }
-    if (contextp -> enabled == TT_ELEMENT_HIDE) {
-        return;
-    }
-    double itemHeight = (contextp -> size * 1.8);
-    double contextTextX = contextp -> x;
-    double contextTextY = contextp -> y - itemHeight / 2 - 2;
-    /* determine direction */
-    if (contextp -> direction == TT_CONTEXT_DIRECTION_AUTO) {
-        if (contextTextX + contextp -> maxXfactor + contextp -> size / 1.25 >= turtle.initbounds[2]) {
-            contextTextX = contextp -> x - contextp -> maxXfactor - contextp -> size / 1.25;
-        }
-        if (contextTextY - contextp -> size * 0.9 - (contextp -> options -> length - 1) * itemHeight - 2 <= turtle.initbounds[1]) {
-            contextTextY = contextp -> y + contextp -> size * 0.9 + (contextp -> options -> length - 1) * itemHeight + 2;
-        }
-    } else {
-        if (contextp -> direction == TT_CONTEXT_DIRECTION_UP_LEFT || contextp -> direction == TT_CONTEXT_DIRECTION_DOWN_LEFT) {
-            contextTextX = contextp -> x - contextp -> maxXfactor - contextp -> size / 1.25;
-        }
-        if (contextp -> direction == TT_CONTEXT_DIRECTION_UP_LEFT || contextp -> direction == TT_CONTEXT_DIRECTION_UP_RIGHT) {
-            contextTextY = contextp -> y + contextp -> size * 0.9 + (contextp -> options -> length - 1) * itemHeight + 2;
-        }
-    }
-    tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_BASE]);
-    turtleRectangle(contextTextX, contextTextY - contextp -> size * 0.9 - (contextp -> options -> length - 1) * itemHeight - 2, contextTextX + contextp -> maxXfactor + contextp -> size / 1.25, contextTextY + contextp -> size * 0.9 + 2);
-    tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_TEXT]);
-    contextp -> index = -1;
-    contextp -> value = -1;
-    for (int32_t i = 0; i < contextp -> options -> length; i++) {
-        if (turtle.mouseX > contextTextX && turtle.mouseX < contextTextX + contextp -> maxXfactor + contextp -> size / 1.25 && turtle.mouseY >= contextTextY - i * itemHeight - contextp -> size * 0.9 && turtle.mouseY < contextTextY - i * itemHeight + contextp -> size * 0.9) {
-            tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_SELECT]);
-            turtleRectangle(contextTextX, contextTextY - i * itemHeight - contextp -> size * 0.9, contextTextX + contextp -> maxXfactor + contextp -> size / 1.25, contextTextY - i * itemHeight + contextp -> size * 0.9);
-            tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_TEXT]);
-            contextp -> index = i;
-            contextp -> value = i;
-        }
-        turtleTextWriteUnicode(contextp -> options -> data[i].s, contextTextX + contextp -> size / 2.5, contextTextY - i * itemHeight, contextp -> size - 1, 0);
-    }
-    if (contextp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_CONTEXT || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_CONTEXT && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
-        tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_CONTEXT;
-        tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
-        if (turtleMouseDown()) {
-            contextp -> enabled = TT_ELEMENT_HIDE;
-        }
-    }
-    if (contextp -> variable != NULL) {
-        *contextp -> variable = contextp -> index;
-    }
-}
-
-void tt_dropdownUpdate(tt_dropdown_t *dropdownp) {
-    if (dropdownp -> variable != NULL) {
-        dropdownp -> index = *dropdownp -> variable;
-        dropdownp -> value = *dropdownp -> variable;
-    }
-    if (dropdownp -> enabled == TT_ELEMENT_HIDE) {
-        return;
-    }
-    /* render dropdown default position */
-    double dropdownX = dropdownp -> x;
-    double dropdownY = dropdownp -> y;
-    double xfactor = turtleTextGetUnicodeLength(dropdownp -> options -> data[dropdownp -> index].s, dropdownp -> size - 1);
-    double itemHeight = (dropdownp -> size * 1.8);
-    double dropdownXFactor[2];
-    double dropdownMaxXFactor[2];
-    double dropdownAlignFactor;
-    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT]);
-    if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
-        dropdownXFactor[0] = dropdownX;
-        dropdownXFactor[1] = dropdownX + xfactor + dropdownp -> size * 1.2;
-        dropdownMaxXFactor[0] = dropdownX;
-        dropdownMaxXFactor[1] = dropdownX + dropdownp -> maxXfactor + dropdownp -> size * 1.1;
-        if (dropdownXFactor[1] + dropdownp -> size * 1.2 > dropdownMaxXFactor[1]) {
-            dropdownMaxXFactor[1] = dropdownXFactor[1] + dropdownp -> size * 1.2;
-        }
-        dropdownAlignFactor = 0;
-        turtleTextWriteUnicode(dropdownp -> label, dropdownX + dropdownp -> size / 5, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
-    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
-        dropdownXFactor[0] = dropdownX - xfactor / 2 - dropdownp -> size;
-        dropdownXFactor[1] = dropdownX + xfactor / 2;
-        dropdownMaxXFactor[0] = dropdownX - dropdownp -> maxXfactor / 2 - dropdownp -> size / 2;
-        dropdownMaxXFactor[1] = dropdownX + dropdownp -> maxXfactor / 2 + dropdownp -> size / 2;
-        if (dropdownXFactor[1] - dropdownXFactor[0] > dropdownMaxXFactor[1] - dropdownMaxXFactor[0] - dropdownp -> size) {
-            dropdownMaxXFactor[0] = dropdownXFactor[0];
-            dropdownMaxXFactor[1] = dropdownXFactor[1] + dropdownp -> size;
-        }
-        dropdownAlignFactor = 50;
-        turtleTextWriteUnicode(dropdownp -> label, dropdownX, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
-    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
-        dropdownXFactor[0] = dropdownX - xfactor - dropdownp -> size * 2;
-        dropdownXFactor[1] = dropdownX - dropdownp -> size;
-        dropdownMaxXFactor[0] = dropdownX - dropdownp -> maxXfactor - dropdownp -> size * 2.2;
-        dropdownMaxXFactor[1] = dropdownX;
-        dropdownAlignFactor = 100;
-        turtleTextWriteUnicode(dropdownp -> label, dropdownX - dropdownp -> size / 5, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
-    }
-    int32_t dropdownDirection = dropdownp -> direction;
-    if (dropdownDirection == TT_DROPDOWN_DIRECTION_AUTO) {
-        if (dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight <= turtle.initbounds[1]) {
-            dropdownDirection = TT_DROPDOWN_DIRECTION_UP;
-        } else {
-            dropdownDirection = TT_DROPDOWN_DIRECTION_DOWN;
-        }
-    }
-    if (dropdownDirection == TT_DROPDOWN_DIRECTION_AUTO_PREFER_UP) {
-        if (dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight >= turtle.initbounds[3]) {
-            dropdownDirection = TT_DROPDOWN_DIRECTION_DOWN;
-        } else {
-            dropdownDirection = TT_DROPDOWN_DIRECTION_UP;
-        }
-    }
-    int32_t directionRender = 1;
-    if (dropdownDirection == TT_DROPDOWN_DIRECTION_UP) {
-        directionRender = -1;
-    }
-    if (dropdownp -> status == -1) {
-        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_SELECT]);
-        turtleRectangle(dropdownXFactor[0], dropdownY - dropdownp -> size * 0.9, dropdownXFactor[1] + dropdownp -> size, dropdownY + dropdownp -> size * 0.9);
-    } else if (dropdownp -> status >= 1) {
-        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_BASE]);
-        if (dropdownDirection == TT_DROPDOWN_DIRECTION_UP) {
-            turtleRectangle(dropdownMaxXFactor[0], dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight, dropdownMaxXFactor[1], dropdownY - dropdownp -> size * 0.9);
-        } else {
-            turtleRectangle(dropdownMaxXFactor[0], dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight, dropdownMaxXFactor[1], dropdownY + dropdownp -> size * 0.9);
-        }
-    } else {
-        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_BASE]);
-        turtleRectangle(dropdownXFactor[0], dropdownY - dropdownp -> size * 0.9, dropdownXFactor[1] + dropdownp -> size, dropdownY + dropdownp -> size * 0.9);
-    }
-    /* mouse */
-    if (dropdownp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_DROPDOWN || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_DROPDOWN && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || dropdownp -> status > 0)) {
-        if (dropdownp -> enabled == TT_ELEMENT_ENABLED && tt_ribbon.mainselect[2] == -1) {
-            if (turtle.mouseX > dropdownXFactor[0] && turtle.mouseX < dropdownXFactor[1] + dropdownp -> size && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9) {
-                if (!turtleMouseDown() && dropdownp -> status == 0) {
-                    dropdownp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_DROPDOWN;
-                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
-                }
-            } else {
-                if (dropdownp -> status == -1) {
-                    dropdownp -> status = 0;
-                }
-            }
-            if (dropdownp -> status == -1) {
-                if (turtleMouseDown()) {
-                    dropdownp -> status = 1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_HIGHEST;
-                    tt_globals.elementLogicIndex = TT_ELEMENT_PRIORITY_DROPDOWN; // subverting expectations
-                }
-            }
-            if (dropdownp -> status == 1) {
-                if (!turtleMouseDown()) {
-                    if (turtle.mouseX > dropdownMaxXFactor[0] && turtle.mouseX < dropdownMaxXFactor[1] && ((directionRender == 1 && turtle.mouseY > dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY <= dropdownY + dropdownp -> size * 0.9 - itemHeight) || (directionRender == -1 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9 + itemHeight))) {
-                        uint32_t selected = round((dropdownY - turtle.mouseY) / itemHeight);
-                        if (directionRender == -1) {
-                            selected = round((turtle.mouseY - dropdownY) / itemHeight);
-                        }
-                        if (selected != 0) {
-                            if (dropdownp -> index >= selected) {
-                                dropdownp -> index = selected - 1;
-                                dropdownp -> value = selected - 1;
-                            } else {
-                                dropdownp -> index = selected;
-                                dropdownp -> value = selected;
-                            }
-                        }
-                        dropdownp -> status = -2;
-                    } else {
-                        dropdownp -> status = 2;
-                    }
-                }
-            }
-            if (dropdownp -> status == -2) {
-                if (!turtleMouseDown()) {
-                    dropdownp -> status = 0;
-                }
-            }
-            if (dropdownp -> status == 2 || dropdownp -> status == 1) {
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_DROPDOWN;
-                tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
-                if (turtle.mouseX > dropdownMaxXFactor[0] && turtle.mouseX < dropdownMaxXFactor[1] && ((directionRender == 1 && turtle.mouseY > dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY <= dropdownY + dropdownp -> size * 0.9) || (directionRender == -1 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9))) {
-                    uint32_t selected = round((dropdownY - turtle.mouseY) / itemHeight);
-                    if (directionRender == -1) {
-                        selected = round((turtle.mouseY - dropdownY) / itemHeight);
-                    }
-                    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_HOVER]);
-                    turtleRectangle(dropdownMaxXFactor[0], dropdownY - dropdownp -> size * 0.9 - selected * itemHeight * directionRender, dropdownMaxXFactor[1], dropdownY + dropdownp -> size * 0.9 - selected * itemHeight * directionRender);
-                    if (turtleMouseDown() && dropdownp -> status == 2) {
-                        if (selected != 0) {
-                            if (dropdownp -> index >= selected) {
-                                dropdownp -> index = selected - 1;
-                                dropdownp -> value = selected - 1;
-                            } else {
-                                dropdownp -> index = selected;
-                                dropdownp -> value = selected;
-                            }
-                        }
-                        dropdownp -> status = -2;
-                    }
-                } else {
-                    if (turtleMouseDown() && dropdownp -> status == 2) {
-                        dropdownp -> status = 0;
-                    }
-                }
-                tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER]);
-                int32_t renderIndex = 1;
-                for (uint32_t i = 0; i < dropdownp -> options -> length; i++) {
-                    if (i != dropdownp -> index) {
-                        if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
-                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, dropdownMaxXFactor[0] + dropdownp -> size / 2, dropdownY - renderIndex * itemHeight * directionRender, dropdownp -> size - 1, dropdownAlignFactor);
-                        } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
-                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, (dropdownMaxXFactor[0] + dropdownMaxXFactor[1]) / 2, dropdownY - renderIndex * itemHeight * directionRender, dropdownp -> size - 1, dropdownAlignFactor);
-                        } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
-                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, dropdownMaxXFactor[1] - dropdownp -> size * 1.58, dropdownY - renderIndex * itemHeight * directionRender, dropdownp -> size - 1, dropdownAlignFactor);
-                        }
-                        renderIndex++;
-                    }
-                }
-            }
-        }
-    } else {
-        dropdownp -> status = 0;
-    }
-    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER]);
-    if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
-        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, dropdownXFactor[0] + dropdownp -> size / 2, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
-    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
-        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, (dropdownXFactor[0] + dropdownXFactor[1]) / 2, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
-    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
-        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, dropdownXFactor[1] - dropdownp -> size * 0.55, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
-    }
-    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TRIANGLE]);
-    if (dropdownp -> status >= 1) {
-        turtleTriangle(dropdownXFactor[1] + dropdownp -> size * 0.4, dropdownY + dropdownp -> size * 0.4, dropdownXFactor[1] + dropdownp -> size * 0.4, dropdownY - dropdownp -> size * 0.4, dropdownXFactor[1] - dropdownp -> size * 0.2, dropdownY);
-    } else {
-        turtleTriangle(dropdownXFactor[1] + dropdownp -> size * 0.6, dropdownY + dropdownp -> size * 0.3, dropdownXFactor[1] - dropdownp -> size * 0.2, dropdownY + dropdownp -> size * 0.3, dropdownXFactor[1] + dropdownp -> size * 0.2, dropdownY - dropdownp -> size * 0.3);
-    }
-    if (dropdownp -> variable != NULL) {
-        *dropdownp -> variable = dropdownp -> index;
     }
 }
 
@@ -61509,7 +63725,7 @@ void tt_textboxAddKey(tt_textbox_t *textboxp, int32_t key) {
 }
 
 void tt_textboxUnicodeCallback(uint32_t codepoint) {
-    for (uint32_t i = 0; i < tt_elements.textboxes -> length; i++) {
+    for (int32_t i = 0; i < tt_elements.textboxes -> length; i++) {
         tt_textbox_t *textboxp = (tt_textbox_t *) (tt_elements.textboxes -> data[i].p);
         if (textboxp -> status > 1) {
             tt_textboxAddKey(textboxp, codepoint);
@@ -61582,11 +63798,11 @@ void tt_textboxHandleOtherKey(tt_textbox_t *textboxp, int32_t key) {
 void tt_textboxKeyCallback(int32_t key, int32_t scancode, int32_t action) {
     /* non-printable keys */
     if (action == GLFW_PRESS) {
-        for (uint32_t i = 0; i < tt_elements.textboxes -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.textboxes -> length; i++) {
             tt_textbox_t *textboxp = (tt_textbox_t *) (tt_elements.textboxes -> data[i].p);
             if (textboxp -> status > 1) {
                 textboxp -> lastKey = key;
-                textboxp -> keyTimeout = 50;
+                textboxp -> keyTimeout = textboxp -> initialKeyTimeout;
                 tt_textboxHandleOtherKey(textboxp, key);
                 break;
             }
@@ -61672,7 +63888,7 @@ void tt_textboxUpdate(tt_textbox_t *textboxp) {
     if (textboxp -> lastKey > 0) {
         if (turtleKeyPressed(textboxp -> lastKey)) {
             if (textboxp -> keyTimeout == 0) {
-                textboxp -> keyTimeout = 4;
+                textboxp -> keyTimeout = textboxp -> heldKeyTimeout;
                 tt_textboxHandleOtherKey(textboxp, textboxp -> lastKey);
             }
         } else {
@@ -61761,7 +63977,7 @@ void tt_textboxUpdate(tt_textbox_t *textboxp) {
         turtleRectangle(textboxp -> x + textboxp -> renderPixelOffset + textLength, textboxp -> y - textboxp -> size * 0.8, textboxp -> x + textboxp -> renderPixelOffset + textLength + 1, textboxp -> y + textboxp -> size * 0.8);
     }
     /* mouse */
-    if (textboxp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_PRIORITY_TEXTBOX || (tt_globals.elementLogicTypeOld == TT_ELEMENT_PRIORITY_TEXTBOX && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || textboxp -> status > 1)) {
+    if (textboxp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_TEXTBOX || (tt_globals.elementLogicTypeOld == TT_ELEMENT_TEXTBOX && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || textboxp -> status > 1)) {
         if (turtle.mouseX > textboxp -> x && turtle.mouseX < textboxp -> x + textboxp -> length && turtle.mouseY > textboxp -> y - textboxp -> size && turtle.mouseY < textboxp -> y + textboxp -> size) {
             textboxp -> mouseOver = 1;
         } else {
@@ -61778,12 +63994,12 @@ void tt_textboxUpdate(tt_textbox_t *textboxp) {
         } else {
             if (textboxp -> status == 1) {
                 textboxp -> status = 2;
-                tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_HIGHEST;
-                tt_globals.elementLogicIndex = TT_ELEMENT_PRIORITY_TEXTBOX; // subverting expectations
+                tt_globals.elementLogicType = TT_ELEMENT_HIGHEST;
+                tt_globals.elementLogicIndex = TT_ELEMENT_TEXTBOX; // subverting expectations
             } else if (textboxp -> status < 2) {
                 if (textboxp -> mouseOver) {
                     textboxp -> status = -1;
-                    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_TEXTBOX;
+                    tt_globals.elementLogicType = TT_ELEMENT_TEXTBOX;
                     tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
                 } else {
                     textboxp -> status = 0;
@@ -61796,68 +64012,401 @@ void tt_textboxUpdate(tt_textbox_t *textboxp) {
     }
 }
 
+void tt_dropdownUpdate(tt_dropdown_t *dropdownp) {
+    if (dropdownp -> variable != NULL) {
+        dropdownp -> index = *dropdownp -> variable;
+        dropdownp -> value = *dropdownp -> variable;
+    }
+    if (dropdownp -> enabled == TT_ELEMENT_HIDE) {
+        return;
+    }
+    /* render dropdown default position */
+    double dropdownX = dropdownp -> x;
+    double dropdownY = dropdownp -> y;
+    double xfactor = turtleTextGetUnicodeLength(dropdownp -> options -> data[dropdownp -> index].s, dropdownp -> size - 1);
+    double itemHeight = (dropdownp -> size * 1.8);
+    double dropdownXFactor[2];
+    double dropdownMaxXFactor[2];
+    double dropdownAlignFactor;
+    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT]);
+    if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
+        dropdownXFactor[0] = dropdownX;
+        dropdownXFactor[1] = dropdownX + xfactor + dropdownp -> size * 1.2;
+        dropdownMaxXFactor[0] = dropdownX;
+        dropdownMaxXFactor[1] = dropdownX + dropdownp -> maxXfactor + dropdownp -> size * 1.1;
+        if (dropdownXFactor[1] + dropdownp -> size * 1.2 > dropdownMaxXFactor[1]) {
+            dropdownMaxXFactor[1] = dropdownXFactor[1] + dropdownp -> size * 1.2;
+        }
+        dropdownAlignFactor = 0;
+        turtleTextWriteUnicode(dropdownp -> label, dropdownX + dropdownp -> size / 5, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
+    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
+        dropdownXFactor[0] = dropdownX - xfactor / 2 - dropdownp -> size;
+        dropdownXFactor[1] = dropdownX + xfactor / 2;
+        dropdownMaxXFactor[0] = dropdownX - dropdownp -> maxXfactor / 2 - dropdownp -> size / 2;
+        dropdownMaxXFactor[1] = dropdownX + dropdownp -> maxXfactor / 2 + dropdownp -> size / 2;
+        if (dropdownXFactor[1] - dropdownXFactor[0] > dropdownMaxXFactor[1] - dropdownMaxXFactor[0] - dropdownp -> size) {
+            dropdownMaxXFactor[0] = dropdownXFactor[0];
+            dropdownMaxXFactor[1] = dropdownXFactor[1] + dropdownp -> size;
+        }
+        dropdownAlignFactor = 50;
+        turtleTextWriteUnicode(dropdownp -> label, dropdownX, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
+    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
+        dropdownXFactor[0] = dropdownX - xfactor - dropdownp -> size * 2;
+        dropdownXFactor[1] = dropdownX - dropdownp -> size;
+        dropdownMaxXFactor[0] = dropdownX - dropdownp -> maxXfactor - dropdownp -> size * 2.2;
+        dropdownMaxXFactor[1] = dropdownX;
+        dropdownAlignFactor = 100;
+        turtleTextWriteUnicode(dropdownp -> label, dropdownX - dropdownp -> size / 5, dropdownY + 2 * dropdownp -> size, dropdownp -> size - 1, dropdownAlignFactor);
+    }
+    int32_t dropdownDirection = dropdownp -> direction;
+    if (dropdownDirection == TT_DROPDOWN_DIRECTION_AUTO) {
+        if (dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight <= dropdownp -> autoLowerBound) {
+            dropdownDirection = TT_DROPDOWN_DIRECTION_UP;
+        } else {
+            dropdownDirection = TT_DROPDOWN_DIRECTION_DOWN;
+        }
+    }
+    if (dropdownDirection == TT_DROPDOWN_DIRECTION_AUTO_PREFER_UP) {
+        if (dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight >= dropdownp -> autoUpperBound) {
+            dropdownDirection = TT_DROPDOWN_DIRECTION_DOWN;
+        } else {
+            dropdownDirection = TT_DROPDOWN_DIRECTION_UP;
+        }
+    }
+    int32_t directionRender = 1;
+    if (dropdownDirection == TT_DROPDOWN_DIRECTION_UP) {
+        directionRender = -1;
+    }
+    if (dropdownp -> status == -1) {
+        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_SELECT]);
+        turtleRectangle(dropdownXFactor[0], dropdownY - dropdownp -> size * 0.9, dropdownXFactor[1] + dropdownp -> size, dropdownY + dropdownp -> size * 0.9);
+    } else if (dropdownp -> status >= 1) {
+        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_BASE]);
+        if (dropdownDirection == TT_DROPDOWN_DIRECTION_UP) {
+            turtleRectangle(dropdownMaxXFactor[0], dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight, dropdownMaxXFactor[1], dropdownY - dropdownp -> size * 0.9);
+        } else {
+            turtleRectangle(dropdownMaxXFactor[0], dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight, dropdownMaxXFactor[1], dropdownY + dropdownp -> size * 0.9);
+        }
+    } else {
+        tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_BASE]);
+        turtleRectangle(dropdownXFactor[0], dropdownY - dropdownp -> size * 0.9, dropdownXFactor[1] + dropdownp -> size, dropdownY + dropdownp -> size * 0.9);
+    }
+    /* mouse */
+    if (dropdownp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_DROPDOWN || (tt_globals.elementLogicTypeOld == TT_ELEMENT_DROPDOWN && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || dropdownp -> status > 0)) {
+        if (dropdownp -> enabled == TT_ELEMENT_ENABLED && tt_ribbon.mainselect[2] == -1) {
+            if (turtle.mouseX > dropdownXFactor[0] && turtle.mouseX < dropdownXFactor[1] + dropdownp -> size && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9) {
+                if (!turtleMouseDown() && dropdownp -> status == 0) {
+                    dropdownp -> status = -1;
+                    tt_globals.elementLogicType = TT_ELEMENT_DROPDOWN;
+                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
+                }
+            } else {
+                if (dropdownp -> status == -1) {
+                    dropdownp -> status = 0;
+                }
+            }
+            if (dropdownp -> status == -1) {
+                if (turtleMouseDown()) {
+                    dropdownp -> status = 1;
+                    tt_globals.elementLogicType = TT_ELEMENT_HIGHEST;
+                    tt_globals.elementLogicIndex = TT_ELEMENT_DROPDOWN; // subverting expectations
+                }
+            }
+            if (dropdownp -> status == 1) {
+                if (!turtleMouseDown()) {
+                    if (turtle.mouseX > dropdownMaxXFactor[0] && turtle.mouseX < dropdownMaxXFactor[1] && ((directionRender == 1 && turtle.mouseY > dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY <= dropdownY + dropdownp -> size * 0.9 - itemHeight) || (directionRender == -1 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9 + itemHeight))) {
+                        int32_t selected = round((dropdownY - turtle.mouseY) / itemHeight);
+                        if (directionRender == -1) {
+                            selected = round((turtle.mouseY - dropdownY) / itemHeight);
+                        }
+                        if (selected != 0) {
+                            if (dropdownp -> index >= selected) {
+                                dropdownp -> index = selected - 1;
+                                dropdownp -> value = selected - 1;
+                            } else {
+                                dropdownp -> index = selected;
+                                dropdownp -> value = selected;
+                            }
+                        }
+                        dropdownp -> status = -2;
+                    } else {
+                        dropdownp -> status = 2;
+                    }
+                }
+            }
+            if (dropdownp -> status == -2) {
+                if (!turtleMouseDown()) {
+                    dropdownp -> status = 0;
+                }
+            }
+            if (dropdownp -> status == 2 || dropdownp -> status == 1) {
+                tt_globals.elementLogicType = TT_ELEMENT_DROPDOWN;
+                tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
+                if (turtle.mouseX > dropdownMaxXFactor[0] && turtle.mouseX < dropdownMaxXFactor[1] && ((directionRender == 1 && turtle.mouseY > dropdownY - dropdownp -> size * 0.9 - (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY <= dropdownY + dropdownp -> size * 0.9) || (directionRender == -1 && turtle.mouseY < dropdownY + dropdownp -> size * 0.9 + (dropdownp -> options -> length - 1) * itemHeight && turtle.mouseY >= dropdownY - dropdownp -> size * 0.9))) {
+                    int32_t selected = round((dropdownY - turtle.mouseY) / itemHeight);
+                    if (directionRender == -1) {
+                        selected = dropdownp -> options -> length - round((turtle.mouseY - dropdownY) / itemHeight);
+                    }
+                    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_HOVER]);
+                    turtleRectangle(dropdownMaxXFactor[0], dropdownY - dropdownp -> size * 0.9 - (directionRender - 1) / 2.0 * dropdownp -> options -> length * itemHeight - selected * itemHeight, dropdownMaxXFactor[1], dropdownY + dropdownp -> size * 0.9 - (directionRender - 1) / 2.0 * dropdownp -> options -> length * itemHeight - selected * itemHeight);
+                    if (turtleMouseDown() && dropdownp -> status == 2) {
+                        if (selected >= dropdownp -> options -> length) {
+                            selected = 0;
+                        }
+                        if (selected != 0) {
+                            if (dropdownp -> index >= selected) {
+                                dropdownp -> index = selected - 1;
+                                dropdownp -> value = selected - 1;
+                            } else {
+                                dropdownp -> index = selected;
+                                dropdownp -> value = selected;
+                            }
+                        }
+                        dropdownp -> status = -2;
+                    }
+                } else {
+                    if (turtleMouseDown() && dropdownp -> status == 2) {
+                        dropdownp -> status = 0;
+                    }
+                }
+                tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER]);
+                int32_t renderIndex = 1;
+                for (int32_t i = 0; i < dropdownp -> options -> length; i++) {
+                    if (i != dropdownp -> index) {
+                        if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
+                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, dropdownMaxXFactor[0] + dropdownp -> size / 2, dropdownY - (directionRender - 1) / 2.0 * dropdownp -> options -> length * itemHeight - renderIndex * itemHeight, dropdownp -> size - 1, dropdownAlignFactor);
+                        } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
+                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, (dropdownMaxXFactor[0] + dropdownMaxXFactor[1]) / 2, dropdownY - (directionRender - 1) / 2.0 * dropdownp -> options -> length * itemHeight - renderIndex * itemHeight, dropdownp -> size - 1, dropdownAlignFactor);
+                        } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
+                            turtleTextWriteUnicode(dropdownp -> options -> data[i].s, dropdownMaxXFactor[1] - dropdownp -> size * 1.58, dropdownY - (directionRender - 1) / 2.0 * dropdownp -> options -> length * itemHeight - renderIndex * itemHeight, dropdownp -> size - 1, dropdownAlignFactor);
+                        }
+                        renderIndex++;
+                    }
+                }
+            }
+        }
+    } else {
+        dropdownp -> status = 0;
+    }
+    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TEXT_HOVER]);
+    if (dropdownp -> align == TT_DROPDOWN_ALIGN_LEFT) {
+        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, dropdownXFactor[0] + dropdownp -> size / 2, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
+    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_CENTER) {
+        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, (dropdownXFactor[0] + dropdownXFactor[1]) / 2, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
+    } else if (dropdownp -> align == TT_DROPDOWN_ALIGN_RIGHT) {
+        turtleTextWriteUnicode(dropdownp -> options -> data[dropdownp -> index].s, dropdownXFactor[1] - dropdownp -> size * 0.55, dropdownY, dropdownp -> size - 1, dropdownAlignFactor);
+    }
+    tt_setColor(dropdownp -> color[TT_COLOR_SLOT_DROPDOWN_TRIANGLE]);
+    if (dropdownp -> status >= 1) {
+        turtleTriangle(dropdownXFactor[1] + dropdownp -> size * 0.4, dropdownY + dropdownp -> size * 0.4, dropdownXFactor[1] + dropdownp -> size * 0.4, dropdownY - dropdownp -> size * 0.4, dropdownXFactor[1] - dropdownp -> size * 0.2, dropdownY);
+    } else {
+        turtleTriangle(dropdownXFactor[1] + dropdownp -> size * 0.6, dropdownY + dropdownp -> size * 0.3, dropdownXFactor[1] - dropdownp -> size * 0.2, dropdownY + dropdownp -> size * 0.3, dropdownXFactor[1] + dropdownp -> size * 0.2, dropdownY - dropdownp -> size * 0.3);
+    }
+    if (dropdownp -> variable != NULL) {
+        *dropdownp -> variable = dropdownp -> index;
+    }
+}
+
+/*
+scrollbar range of motion (coordinates):
+scrollbar.length * (1 - scrollbar.barPercentage / 100)
+tip: try to match the ratio of visible content to the scrollbar's barPercentage - if half of the content can be shown on one screen then make the barPercentage 50
+*/
+void tt_scrollbarUpdate(tt_scrollbar_t *scrollbarp) {
+    if (scrollbarp -> variable != NULL) {
+        scrollbarp -> value = *scrollbarp -> variable;
+    }
+    if (scrollbarp -> enabled == TT_ELEMENT_HIDE) {
+        return;
+    }
+    if (scrollbarp -> type == TT_SCROLLBAR_TYPE_HORIZONTAL) {
+        double scrollbarLeft = scrollbarp -> x - scrollbarp -> length / 2;
+        double scrollbarRight = scrollbarp -> x + scrollbarp -> length / 2;
+        double dragLeft = scrollbarLeft + scrollbarp -> value / 100 * (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100));
+        double dragRight = dragLeft + (scrollbarp -> length * scrollbarp -> barPercentage / 100);
+        turtlePenSize(scrollbarp -> size * 1);
+        tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BASE]);
+        turtleGoto(scrollbarLeft, scrollbarp -> y);
+        turtlePenDown();
+        turtleGoto(scrollbarRight, scrollbarp -> y);
+        turtlePenUp();
+        turtlePenSize(scrollbarp -> size * 0.8);
+        if (scrollbarp -> status == -1 && turtle.mouseX > dragLeft - scrollbarp -> size * 0.4 && turtle.mouseX < dragRight + scrollbarp -> size * 0.4) {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_HOVER]);
+        } else if (scrollbarp -> status > 0) {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_CLICKED]);
+        } else {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BAR]);
+        }
+        turtleGoto(dragLeft, scrollbarp -> y);
+        turtlePenDown();
+        turtleGoto(dragRight, scrollbarp -> y);
+        turtlePenUp();
+        /* mouse */
+        if (scrollbarp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_SCROLLBAR || (tt_globals.elementLogicTypeOld == TT_ELEMENT_SCROLLBAR && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || scrollbarp -> status > 0)) {
+            if (scrollbarp -> status == 2) {
+                tt_globals.barAnchor = turtle.mouseX - dragLeft;
+                scrollbarp -> status = 1;
+            }
+            if (turtleMouseDown()) {
+                if (scrollbarp -> status < 0) {
+                    if (turtle.mouseX > dragLeft - scrollbarp -> size * 0.4 && turtle.mouseX < dragRight + scrollbarp -> size * 0.4) {
+                        tt_globals.barAnchor = turtle.mouseX - dragLeft;
+                    } else {
+                        tt_globals.barAnchor = (scrollbarp -> length * scrollbarp -> barPercentage / 100) / 2;
+                        scrollbarp -> status = -2;
+                    }
+                    scrollbarp -> status *= -1;
+                    tt_globals.elementLogicType = TT_ELEMENT_HIGHEST;
+                    tt_globals.elementLogicIndex = TT_ELEMENT_SCROLLBAR; // subverting expectations
+                }
+            } else {
+                if (turtle.mouseY > scrollbarp -> y - scrollbarp -> size * 0.5 && turtle.mouseY < scrollbarp -> y + scrollbarp -> size * 0.5 && turtle.mouseX < scrollbarRight + scrollbarp -> size * 0.5 && turtle.mouseX > scrollbarLeft - scrollbarp -> size * 0.5) {
+                    scrollbarp -> status = -1;
+                    tt_globals.elementLogicType = TT_ELEMENT_SCROLLBAR;
+                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
+                } else {
+                    scrollbarp -> status = 0;
+                }
+            }
+            if (scrollbarp -> status > 0) {
+                scrollbarp -> value = (turtle.mouseX - scrollbarLeft - tt_globals.barAnchor) / (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100)) * 100;
+                if (scrollbarp -> value < 0) {
+                    scrollbarp -> value = 0;
+                }
+                if (scrollbarp -> value > 100) {
+                    scrollbarp -> value = 100;
+                }
+            }
+        } else {
+            scrollbarp -> status = 0;
+        }
+    } else if (scrollbarp -> type == TT_SCROLLBAR_TYPE_VERTICAL) {
+        double scrollbarTop = scrollbarp -> y + scrollbarp -> length / 2;
+        double scrollbarBottom = scrollbarp -> y - scrollbarp -> length / 2;
+        double dragTop = scrollbarTop - scrollbarp -> value / 100 * (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100));
+        double dragBottom = dragTop - (scrollbarp -> length * scrollbarp -> barPercentage / 100);
+        turtlePenSize(scrollbarp -> size * 1);
+        tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BASE]);
+        turtleGoto(scrollbarp -> x, scrollbarTop);
+        turtlePenDown();
+        turtleGoto(scrollbarp -> x, scrollbarBottom);
+        turtlePenUp();
+        turtlePenSize(scrollbarp -> size * 0.8);
+        if (scrollbarp -> status == -1 && turtle.mouseY > dragBottom - scrollbarp -> size * 0.4 && turtle.mouseY < dragTop + scrollbarp -> size * 0.4) {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_HOVER]);
+        } else if (scrollbarp -> status > 0) {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_CLICKED]);
+        } else {
+            tt_setColor(scrollbarp -> color[TT_COLOR_SLOT_SCROLLBAR_BAR]);
+        }
+        turtleGoto(scrollbarp -> x, dragTop);
+        turtlePenDown();
+        turtleGoto(scrollbarp -> x, dragBottom);
+        turtlePenUp();
+        /* mouse */
+        if (scrollbarp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_SCROLLBAR || (tt_globals.elementLogicTypeOld == TT_ELEMENT_SCROLLBAR && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp) || scrollbarp -> status > 0)) {
+            if (scrollbarp -> status == 2) {
+                tt_globals.barAnchor = dragTop - turtle.mouseY;
+                scrollbarp -> status = 1;
+            }
+            if (turtleMouseDown()) {
+                if (scrollbarp -> status < 0) {
+                    if (turtle.mouseY > dragBottom - scrollbarp -> size * 0.4 && turtle.mouseY < dragTop + scrollbarp -> size * 0.4) {
+                        tt_globals.barAnchor = dragTop - turtle.mouseY;
+                    } else {
+                        tt_globals.barAnchor = (scrollbarp -> length * scrollbarp -> barPercentage / 100) / 2;
+                        scrollbarp -> status = -2;
+                    }
+                    scrollbarp -> status *= -1;
+                    tt_globals.elementLogicType = TT_ELEMENT_HIGHEST;
+                    tt_globals.elementLogicIndex = TT_ELEMENT_SCROLLBAR; // subverting expectations
+                }
+            } else {
+                if (turtle.mouseX > scrollbarp -> x - scrollbarp -> size * 0.5 && turtle.mouseX < scrollbarp -> x + scrollbarp -> size * 0.5 && turtle.mouseY > scrollbarBottom - scrollbarp -> size * 0.5 && turtle.mouseY < scrollbarTop + scrollbarp -> size * 0.5) {
+                    scrollbarp -> status = -1;
+                    tt_globals.elementLogicType = TT_ELEMENT_SCROLLBAR;
+                    tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
+                } else {
+                    scrollbarp -> status = 0;
+                }
+            }
+            if (scrollbarp -> status > 0) {
+                scrollbarp -> value = (scrollbarTop - turtle.mouseY - tt_globals.barAnchor) / (scrollbarp -> length * (1 - scrollbarp -> barPercentage / 100)) * 100;
+                if (scrollbarp -> value < 0) {
+                    scrollbarp -> value = 0;
+                }
+                if (scrollbarp -> value > 100) {
+                    scrollbarp -> value = 100;
+                }
+            }
+        } else {
+            scrollbarp -> status = 0;
+        }
+    }
+    if (scrollbarp -> variable != NULL) {
+        *scrollbarp -> variable = scrollbarp -> value;
+    }
+}
+
+void tt_contextUpdate(tt_context_t *contextp) {
+    if (contextp -> variable != NULL) {
+        contextp -> index = *contextp -> variable;
+        contextp -> value = *contextp -> variable;
+    }
+    if (contextp -> enabled == TT_ELEMENT_HIDE) {
+        return;
+    }
+    double itemHeight = (contextp -> size * 1.8);
+    double contextTextX = contextp -> x;
+    double contextTextY = contextp -> y - itemHeight / 2 - 2;
+    /* determine direction */
+    if (contextp -> direction == TT_CONTEXT_DIRECTION_AUTO) {
+        if (contextTextX + contextp -> maxXfactor + contextp -> size / 1.25 >= contextp -> autoRightBound) {
+            contextTextX = contextp -> x - contextp -> maxXfactor - contextp -> size / 1.25;
+        }
+        if (contextTextY - contextp -> size * 0.9 - (contextp -> options -> length - 1) * itemHeight - 2 <= contextp -> autoLowerBound) {
+            contextTextY = contextp -> y + contextp -> size * 0.9 + (contextp -> options -> length - 1) * itemHeight + 2;
+        }
+    } else {
+        if (contextp -> direction == TT_CONTEXT_DIRECTION_UP_LEFT || contextp -> direction == TT_CONTEXT_DIRECTION_DOWN_LEFT) {
+            contextTextX = contextp -> x - contextp -> maxXfactor - contextp -> size / 1.25;
+        }
+        if (contextp -> direction == TT_CONTEXT_DIRECTION_UP_LEFT || contextp -> direction == TT_CONTEXT_DIRECTION_UP_RIGHT) {
+            contextTextY = contextp -> y + contextp -> size * 0.9 + (contextp -> options -> length - 1) * itemHeight + 2;
+        }
+    }
+    tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_BASE]);
+    turtleRectangle(contextTextX, contextTextY - contextp -> size * 0.9 - (contextp -> options -> length - 1) * itemHeight - 2, contextTextX + contextp -> maxXfactor + contextp -> size / 1.25, contextTextY + contextp -> size * 0.9 + 2);
+    tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_TEXT]);
+    contextp -> index = -1;
+    contextp -> value = -1;
+    for (int32_t i = 0; i < contextp -> options -> length; i++) {
+        if (turtle.mouseX > contextTextX && turtle.mouseX < contextTextX + contextp -> maxXfactor + contextp -> size / 1.25 && turtle.mouseY >= contextTextY - i * itemHeight - contextp -> size * 0.9 && turtle.mouseY < contextTextY - i * itemHeight + contextp -> size * 0.9) {
+            tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_SELECT]);
+            turtleRectangle(contextTextX, contextTextY - i * itemHeight - contextp -> size * 0.9, contextTextX + contextp -> maxXfactor + contextp -> size / 1.25, contextTextY - i * itemHeight + contextp -> size * 0.9);
+            tt_setColor(contextp -> color[TT_COLOR_SLOT_CONTEXT_TEXT]);
+            contextp -> index = i;
+            contextp -> value = i;
+        }
+        turtleTextWriteUnicode(contextp -> options -> data[i].s, contextTextX + contextp -> size / 2.5, contextTextY - i * itemHeight, contextp -> size - 1, 0);
+    }
+    if (contextp -> enabled == TT_ELEMENT_ENABLED && (tt_globals.elementLogicTypeOld < TT_ELEMENT_CONTEXT || (tt_globals.elementLogicTypeOld == TT_ELEMENT_CONTEXT && tt_globals.elementLogicIndexOld <= (int32_t) tt_globals.elementLogicTemp))) {
+        tt_globals.elementLogicType = TT_ELEMENT_CONTEXT;
+        tt_globals.elementLogicIndex = tt_globals.elementLogicTemp;
+        if (turtleMouseDown()) {
+            contextp -> enabled = TT_ELEMENT_HIDE;
+        }
+    }
+    if (contextp -> variable != NULL) {
+        *contextp -> variable = contextp -> index;
+    }
+}
+
 void turtleToolsUpdate() {
-    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
-    tt_globals.elementLogicIndex = -1;
-    tt_globals.elementLogicTemp = -1;
+    turtleToolsUpdateUI();
     char shapeSave = turtle.penshape;
     turtlePenShape("circle");
-    if (tt_enabled.buttonEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.buttons -> length; i++) {
-            tt_buttonUpdate((tt_button_t *) (tt_elements.buttons -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.switchEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.switches -> length; i++) {
-            tt_switchUpdate((tt_switch_t *) (tt_elements.switches -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.dialEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.dials -> length; i++) {
-            tt_dialUpdate((tt_dial_t *) (tt_elements.dials -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.sliderEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.sliders -> length; i++) {
-            tt_sliderUpdate((tt_slider_t *) (tt_elements.sliders -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.textboxEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.textboxes -> length; i++) {
-            tt_textboxUpdate((tt_textbox_t *) (tt_elements.textboxes -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.dropdownEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.dropdowns -> length; i++) {
-            tt_dropdownUpdate((tt_dropdown_t *) (tt_elements.dropdowns -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.scrollbarEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.scrollbars -> length; i++) {
-            tt_scrollbarUpdate((tt_scrollbar_t *) (tt_elements.scrollbars -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
-    if (tt_enabled.contextEnabled) {
-        tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.contexts -> length; i++) {
-            tt_contextUpdate((tt_context_t *) (tt_elements.contexts -> data[i].p));
-            tt_globals.elementLogicTemp++;
-        }
-    }
     if (tt_enabled.ribbonEnabled) {
         tt_ribbonUpdate();
     }
@@ -61870,63 +64419,87 @@ void turtleToolsUpdate() {
 }
 
 void turtleToolsUpdateUI() {
-    tt_globals.elementLogicType = TT_ELEMENT_PRIORITY_NONE;
+    tt_globals.elementLogicType = TT_ELEMENT_NONE;
     tt_globals.elementLogicIndex = -1;
     tt_globals.elementLogicTemp = -1;
     char shapeSave = turtle.penshape;
     turtlePenShape("circle");
     if (tt_enabled.buttonEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.buttons -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.buttons -> length; i++) {
+            if (((tt_button_t *) (tt_elements.buttons -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_buttonUpdate((tt_button_t *) (tt_elements.buttons -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.switchEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.switches -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.switches -> length; i++) {
+            if (((tt_switch_t *) (tt_elements.switches -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_switchUpdate((tt_switch_t *) (tt_elements.switches -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.dialEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.dials -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.dials -> length; i++) {
+            if (((tt_dial_t *) (tt_elements.dials -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_dialUpdate((tt_dial_t *) (tt_elements.dials -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.sliderEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.sliders -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.sliders -> length; i++) {
+            if (((tt_slider_t *) (tt_elements.sliders -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_sliderUpdate((tt_slider_t *) (tt_elements.sliders -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.textboxEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.textboxes -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.textboxes -> length; i++) {
+            if (((tt_textbox_t *) (tt_elements.textboxes -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_textboxUpdate((tt_textbox_t *) (tt_elements.textboxes -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.dropdownEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.dropdowns -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.dropdowns -> length; i++) {
+            if (((tt_dropdown_t *) (tt_elements.dropdowns -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_dropdownUpdate((tt_dropdown_t *) (tt_elements.dropdowns -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.scrollbarEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.scrollbars -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.scrollbars -> length; i++) {
+            if (((tt_scrollbar_t *) (tt_elements.scrollbars -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_scrollbarUpdate((tt_scrollbar_t *) (tt_elements.scrollbars -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
     }
     if (tt_enabled.contextEnabled) {
         tt_globals.elementLogicTemp = 0;
-        for (uint32_t i = 0; i < tt_elements.contexts -> length; i++) {
+        for (int32_t i = 0; i < tt_elements.contexts -> length; i++) {
+            if (((tt_context_t *) (tt_elements.contexts -> data[i].p)) -> ignored == TT_ELEMENT_IGNORED) {
+                continue;
+            }
             tt_contextUpdate((tt_context_t *) (tt_elements.contexts -> data[i].p));
             tt_globals.elementLogicTemp++;
         }
@@ -62243,6 +64816,7 @@ list_t *osToolsLoadInternal(char *filename, ost_csv_t rowOrColumn, char delimete
             /* case: comma */
             mappedFile[rightIndex] = '\0';
             unitype field;
+            field.l = 0;
             if (fieldType == OSTOOLS_CSV_FIELD_DOUBLE) {
                 sscanf((char *) (mappedFile + leftIndex), "%lf", (double *) &field);
             } else if (fieldType == OSTOOLS_CSV_FIELD_INT) {
@@ -62274,6 +64848,7 @@ list_t *osToolsLoadInternal(char *filename, ost_csv_t rowOrColumn, char delimete
                 char tempHold = mappedFile[rightIndex];
                 mappedFile[rightIndex] = '\0';
                 unitype field;
+                field.l = 0;
                 if (fieldType == OSTOOLS_CSV_FIELD_DOUBLE) {
                     sscanf((char *) (mappedFile + leftIndex), "%lf", (double *) &field);
                 } else if (fieldType == OSTOOLS_CSV_FIELD_INT) {
@@ -62313,6 +64888,7 @@ list_t *osToolsLoadInternal(char *filename, ost_csv_t rowOrColumn, char delimete
         }
     } else {
         unitype field;
+        field.l = 0;
         if (fieldType == OSTOOLS_CSV_FIELD_DOUBLE) {
             sscanf((char *) (mappedFile + leftIndex), "%lf", (double *) &field);
         } else if (fieldType == OSTOOLS_CSV_FIELD_INT) {
@@ -62452,7 +65028,7 @@ int32_t osToolsFileDialogPrompt(ost_file_dialog_save_t openOrSave, ost_file_dial
             buildFilter[j] = (uint16_t) '*';
             buildFilter[j + 1] = (uint16_t) '.';
             j += 2;
-            for (uint32_t k = 0; k < strlen(extensions -> data[i].s) && k < 8; k++) {
+            for (int32_t k = 0; k < strlen(extensions -> data[i].s) && k < 8; k++) {
                 buildFilter[j] = extensions -> data[i].s[k];
                 j += 1;
             }
@@ -62595,7 +65171,7 @@ uint8_t *osToolsFileMap(char *filename, uint32_t *sizeOutput) {
 int32_t osToolsFileUnmap(uint8_t *data) {
     UnmapViewOfFile(data);
     int32_t index = -1;
-    for (uint32_t i = 0; i < osToolsMemmap.mappedFiles -> length; i += 4) {
+    for (int32_t i = 0; i < osToolsMemmap.mappedFiles -> length; i += 4) {
         if (osToolsMemmap.mappedFiles -> data[i + 3].p == data) {
             index = i;
             break;
@@ -62709,12 +65285,12 @@ list_t *osToolsFolderList(char *directory) {
 
 int32_t osToolsFolderCreate(char *folder) {
     /* https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createdirectory */
-    return CreateDirectory(folder, NULL);
+    return !CreateDirectory(folder, NULL);
 }
 
 int32_t osToolsFolderDestroy(char *folder) {
     /* https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-removedirectorya */
-    char directoryFor[MAX_PATH + 10] = "rd /s /q ";
+    char directoryFor[MAX_PATH + 12] = "rd /s /q \"";
     int32_t len = strlen(folder);
     char *holdingCell = strdup(folder);
     for (int32_t i = 0; i < len; i++) {
@@ -62723,6 +65299,7 @@ int32_t osToolsFolderDestroy(char *folder) {
         }
     }
     strcat(directoryFor, holdingCell);
+    strcat(directoryFor, "\"");
     free(holdingCell);
     return system(directoryFor);
     // RemoveDirectoryA(folder);
@@ -63050,7 +65627,7 @@ int32_t osToolsServerSocketCreate(char *serverName, osToolsSocketProtocol_t prot
     list_append(osToolsSocket.socket, (unitype) (void *) winsocket, 'l'); // socket
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // server specifier
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
-    list_append(osToolsSocket.socket, (unitype) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
     list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
     list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
     list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
@@ -63221,7 +65798,7 @@ int32_t osToolsClientSocketCreate(char *clientName, osToolsSocketProtocol_t prot
     list_append(osToolsSocket.socket, (unitype) (void *) winsocket, 'l'); // socket
     list_append(osToolsSocket.socket, (unitype) 1, 'i'); // client specifier
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
-    list_append(osToolsSocket.socket, (unitype) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
     list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
     list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
     list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
@@ -63897,7 +66474,8 @@ int32_t osToolsCameraClose(char *name) {
 
 #endif /* TURTLE_ENABLE_CAMERA */
 
-#endif
+#endif /* OS_WINDOWS */
+
 #ifdef OS_LINUX
 
 /* This is the zenity version of osToolsFileDialog.h, it's for linux */
@@ -64027,7 +66605,7 @@ uint8_t *osToolsFileMap(char *filename, uint32_t *sizeOutput) {
 
 int32_t osToolsFileUnmap(uint8_t *data) {
     int32_t index = -1;
-    for (uint32_t i = 0; i < osToolsMemmap.mappedFiles -> length; i += 2) {
+    for (int32_t i = 0; i < osToolsMemmap.mappedFiles -> length; i += 2) {
         if (osToolsMemmap.mappedFiles -> data[i].p == data) {
             index = i;
             break;
@@ -64313,7 +66891,7 @@ int32_t osToolsServerSocketCreate(char *serverName, osToolsSocketProtocol_t prot
     list_append(osToolsSocket.socket, (unitype) sockfd, 'i'); // socket
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // server specifier
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
-    list_append(osToolsSocket.socket, (unitype) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
     list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
     list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
     list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
@@ -64485,7 +67063,7 @@ int32_t osToolsClientSocketCreate(char *clientName, osToolsSocketProtocol_t prot
     list_append(osToolsSocket.socket, (unitype) sockfd, 'l'); // socket
     list_append(osToolsSocket.socket, (unitype) 1, 'i'); // client specifier
     list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
-    list_append(osToolsSocket.socket, (unitype) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
     list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
     list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
     list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
@@ -64587,7 +67165,618 @@ int32_t osToolsCameraClose(char *name) {
 
 #endif /* TURTLE_ENABLE_CAMERA */
 
-#endif
+#endif /* OS_LINUX */
+
+#ifdef OS_BROWSER
+
+/* Browser version of osTools - limited functionality */
+
+int32_t osToolsInit(char argv0[], GLFWwindow *window) {
+    osToolsIndependentInit(window);
+    /* get executable filepath */
+    FILE *exStringFile = popen("pwd", "r");
+    if (fscanf(exStringFile, "%s", osToolsFileDialog.executableFilepath) == 0) {
+        return -1;
+    }
+    strcat(osToolsFileDialog.executableFilepath, "/");
+    strcat(osToolsFileDialog.executableFilepath, argv0);
+    
+    int32_t index = strlen(osToolsFileDialog.executableFilepath) - 1;
+    while (index > -1 && osToolsFileDialog.executableFilepath[index] != '/') {
+        index--;
+    }
+    osToolsFileDialog.executableFilepath[index + 1] = '\0';
+    return 0;
+}
+
+int32_t osToolsFileDialogPrompt(ost_file_dialog_save_t openOrSave, ost_file_dialog_multiselect_t multiselect, ost_file_dialog_folder_t folder, char *prename, list_t *extensions) {
+    /* currently not supported in browser */
+    return 0;
+}
+
+uint8_t *osToolsFileMap(char *filename, uint32_t *sizeOutput) {
+    int32_t fd = open(filename, O_RDWR);
+    struct stat stats;
+    if (fstat(fd, &stats) == -1) {
+        printf("Could not get stats of file %s\n", filename);
+        *sizeOutput = 0;
+        return NULL;
+    }
+    *sizeOutput = stats.st_size;
+    void *out = mmap(NULL, *sizeOutput, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (out == MAP_FAILED) {
+        printf("Could not memory map file %s\n", filename);
+        *sizeOutput = 0;
+        return NULL;
+    }
+    list_append(osToolsMemmap.mappedFiles, (unitype) out, 'l');
+    list_append(osToolsMemmap.mappedFiles, (unitype) *sizeOutput, 'i');
+    return (uint8_t *) out;
+}
+
+int32_t osToolsFileUnmap(uint8_t *data) {
+    int32_t index = -1;
+    for (int32_t i = 0; i < osToolsMemmap.mappedFiles -> length; i += 2) {
+        if (osToolsMemmap.mappedFiles -> data[i].p == data) {
+            index = i;
+            break;
+        }
+    }
+    if (index >= 0) {
+        munmap(data, osToolsMemmap.mappedFiles -> data[index + 1].i);
+        return 0;
+    } else {
+        printf("Could not find %p in memory mapped index\n", data);
+        return -1;
+    }
+}
+
+list_t *osToolsFileAndFolderList(char *directory) {
+    list_t *output = list_init();
+    DIR *dir = opendir(directory);
+    if (dir == NULL) {
+        return output;
+    }
+    struct dirent *dstream = readdir(dir);
+    while (dstream != NULL) {
+        if (strcmp(dstream -> d_name, ".") == 0 || strcmp(dstream -> d_name, "..") == 0) {
+            dstream = readdir(dir);
+            continue;
+        }
+        list_append(output, (unitype) dstream -> d_name, 's');
+        dstream = readdir(dir);
+    }
+    closedir(dir);
+    return output;
+}
+
+list_t *osToolsFileList(char *directory) {
+    list_t *output = list_init();
+    DIR *dir = opendir(directory);
+    if (dir == NULL) {
+        return output;
+    }
+    struct dirent *dstream = readdir(dir);
+    while (dstream != NULL) {
+        char fullpath[5000] = "";
+        strcat(fullpath, directory);
+        strcat(fullpath, "/");
+        strcat(fullpath, dstream -> d_name);
+        struct stat checkType;
+        stat(fullpath, &checkType);
+        if (S_ISREG(checkType.st_mode)) {
+            list_append(output, (unitype) dstream -> d_name, 's');
+        }
+        dstream = readdir(dir);
+    }
+    closedir(dir);
+    return output;
+}
+
+list_t *osToolsFolderList(char *directory) {
+    list_t *output = list_init();
+    DIR *dir = opendir(directory);
+    if (dir == NULL) {
+        return output;
+    }
+    struct dirent *dstream = readdir(dir);
+    while (dstream != NULL) {
+        if (strcmp(dstream -> d_name, ".") == 0 || strcmp(dstream -> d_name, "..") == 0) {
+            dstream = readdir(dir);
+            continue;
+        }
+        char fullpath[5000] = "";
+        strcat(fullpath, directory);
+        strcat(fullpath, "/");
+        strcat(fullpath, dstream -> d_name);
+        struct stat checkType;
+        stat(fullpath, &checkType);
+        if (S_ISDIR(checkType.st_mode)) {
+            list_append(output, (unitype) dstream -> d_name, 's');
+        }
+        dstream = readdir(dir);
+    }
+    closedir(dir);
+    return output;
+}
+
+int32_t osToolsFolderCreate(char *folder) {
+    return mkdir(folder, 0755);
+}
+
+int32_t osToolsFolderDestroy(char *folder) {
+    char command[5000] = "rm -rf ";
+    strcat(command, folder);
+    return system(command);
+}
+
+void osToolsCloseConsole() {
+    /* don't know how to do this yet - https://unix.stackexchange.com/questions/743272/programatically-start-a-background-process-under-linux */
+    return;
+}
+
+#ifdef TURTLE_ENABLE_SERIAL
+
+/* Serial support on linux: https://blog.mbedded.ninja/programming/operating-systems/linux/linux-serial-ports-using-c-cpp/ */
+
+list_t *osToolsSerialList() {
+    list_t *output = list_init();
+    return output;
+}
+
+int32_t osToolsSerialOpen(char *name, osToolsSerialBaud_t baudRate) {
+    return -1;
+}
+
+int32_t osToolsSerialSend(char *name, uint8_t *data, int32_t length) {
+    return -1;
+}
+
+int32_t osToolsSerialReceive(char *name, uint8_t *buffer, int32_t length, int32_t timeoutMilliseconds) {
+    return -1;
+}
+
+int32_t osToolsSerialClose(char *name) {
+    return -1;
+}
+
+#endif /* TURTLE_ENABLE_SERIAL */
+
+int32_t osToolsGetIP(char *address, uint8_t *buffer, int32_t maxSegments) {
+    char modifiable[strlen(address) + 1];
+    strcpy(modifiable, address);
+    char *check = strtok(modifiable, ".");
+    int32_t segments = 0;
+    while (check != NULL) {
+        if (segments > maxSegments - 1) {
+            printf("osToolsGetIP ERROR: invalid ip address\n");
+            return -1;
+        }
+        int32_t segmentValue = atoi(check);
+        if (segmentValue > 255 || segmentValue < 0) {
+            printf("osToolsGetIP ERROR: invalid ip address\n");
+            return -1;
+        }
+        buffer[segments] = segmentValue;
+        check = strtok(NULL, ".");
+        segments++;
+    }
+    return segments;
+}
+
+int32_t osToolsGetSocketAddress(char *socketName, char *address, int32_t length) {
+    if (!socketName) {
+        printf("osToolsGetSocketAddress ERROR: socketName is NULL\n");
+        return -1;
+    }
+    if (!address) {
+        printf("osToolsGetSocketAddress ERROR: address is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) socketName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsGetSocketAddress ERROR: Could not find socket %s\n", socketName);
+        return -1;
+    }
+    /* only IPv4 */
+    char addressA[32];
+    sprintf(addressA, "%hhu.%hhu.%hhu.%hhu", osToolsSocket.socket -> data[socketIndex + OSI_ADDRESS].i, osToolsSocket.socket -> data[socketIndex + OSI_ADDRESS + 1].i, osToolsSocket.socket -> data[socketIndex + OSI_ADDRESS + 2].i, osToolsSocket.socket -> data[socketIndex + OSI_ADDRESS + 3].i);
+    strncpy(address, addressA, length);
+    address[length - 1] = '\0';
+    return 0;
+}
+
+int32_t osToolsGetPort(char *socketName, char *port, int32_t length) {
+    if (!socketName) {
+        printf("osToolsGetSocketAddress ERROR: socketName is NULL\n");
+        return -1;
+    }
+    if (!port) {
+        printf("osToolsGetSocketAddress ERROR: port is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) socketName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsGetPort ERROR: Could not find socket %s\n", socketName);
+        return -1;
+    }
+    char portA[8];
+    sprintf(portA, "%d", osToolsSocket.socket -> data[socketIndex + OSI_PORT].i);
+    strncpy(port, portA, length);
+    port[length - 1] = '\0';
+    return 0;
+}
+
+#ifdef TURTLE_ENABLE_SOCKETS
+
+int32_t osToolsServerSocketCreate(char *serverName, osToolsSocketProtocol_t protocol, char *serverPort) {
+    if (!serverName) {
+        printf("osToolsServerSocketCreate ERROR: serverName is NULL\n");
+        return -1;
+    }
+    if (!serverPort) {
+        printf("osToolsServerSocketCreate ERROR: port is NULL\n");
+        return -1;
+    }
+    int32_t status;
+    struct addrinfo *result;
+    struct addrinfo hints;
+    for (int32_t i = 0; i < sizeof(hints); i++) {
+        *((((uint8_t *) &hints) + i)) = 0; // bzero
+    }
+    hints.ai_family = AF_INET; // IPv4
+    hints.ai_socktype = SOCK_STREAM;
+    if (protocol == OSTOOLS_PROTOCOL_TCP) {
+        hints.ai_protocol = IPPROTO_TCP;
+    } else if (protocol == OSTOOLS_PROTOCOL_UDP) {
+        hints.ai_protocol = IPPROTO_UDP;
+    }
+    hints.ai_flags = AI_PASSIVE;
+
+    /* get local address */
+    char hostName[128];
+    status = gethostname(hostName, sizeof(hostName));
+    if (status == -1) {
+        printf("osToolsServerSocketCreate ERROR: Could not gethostname\n");
+        return -1;
+    }
+    printf("Host Name: %s\n", hostName);
+
+    struct hostent *host = gethostbyname(hostName);
+    if (host == NULL) {
+        printf("osToolsServerSocketCreate ERROR: Could not gethostbyname\n");
+        return -1;
+    }
+
+    int32_t iter = 0;
+    struct in_addr address;
+    while (host -> h_addr_list[iter] != NULL) {
+        memcpy(&address, host -> h_addr_list[iter], sizeof(address));
+        printf("- Address: %s\n", inet_ntoa(address));
+        iter++;
+    }
+    char *serverAddress = inet_ntoa(address);
+    if (serverAddress == NULL) {
+        printf("osToolsServerSocketCreate ERROR: No addresses to create server on\n");
+        return -1;
+    }
+    uint8_t ipAddress[4] = {0};
+    if (osToolsGetIP(serverAddress, ipAddress, 4) != 4) {
+        printf("osToolsServerSocketCreate ERROR: Invalid ip address\n");
+    }
+
+    /* Resolve the server address and port */
+    status = getaddrinfo(serverAddress, serverPort, &hints, &result);
+    if (status != 0) {
+        printf("osToolsServerSocketCreate ERROR: Could not getaddrinfo\n");
+        return -1;
+    }
+    struct addrinfo *resultElement = result;
+    while (resultElement) {
+        printf("Hosting a server on address %s:%s\n", serverAddress, serverPort);
+        resultElement = resultElement -> ai_next;
+    }
+    if (result == NULL) {
+        printf("osToolsServerSocketCreate ERROR: getaddrinfo returned NULL\n");
+        return -1;
+    }
+
+    /* Create a SOCKET for the server to listen for client connections - Use the first element of linked list returned by getaddrinfo */
+    int32_t sockfd = socket(result -> ai_family, result -> ai_socktype, result -> ai_protocol);
+    if (sockfd == -1) {
+        freeaddrinfo(result);
+        printf("osToolsServerSocketCreate ERROR: Could not create socket\n");
+        return -1;
+    }
+
+    /* Bind the socket to the address */
+    status = bind(sockfd, result -> ai_addr, result -> ai_addrlen);
+    if (status == -1) {
+        freeaddrinfo(result);
+        printf("osToolsServerSocketCreate ERROR: Could not bind socket %s to address %s\n", serverName, serverAddress);
+        return -1;
+    }
+    freeaddrinfo(result);
+
+    list_append(osToolsSocket.socket, (unitype) serverName, 's');
+    list_append(osToolsSocket.socket, (unitype) sockfd, 'i'); // socket
+    list_append(osToolsSocket.socket, (unitype) 0, 'i'); // server specifier
+    list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[3], 'i'); // address[3]
+    for (int32_t i = 4; i < 16; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // address padding
+    }
+    int32_t port;
+    sscanf(serverPort, "%d", &port);
+    list_append(osToolsSocket.socket, (unitype) port, 'i'); // port
+    for (int32_t i = 0; i < 10; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved padding
+    }
+    return 0;
+}
+
+int32_t osToolsServerSocketListen(char *serverName, char *clientName) {
+    if (!serverName) {
+        printf("osToolsServerSocketListen ERROR: serverName is NULL\n");
+        return -1;
+    }
+    if (!clientName) {
+        printf("osToolsServerSocketListen ERROR: clientName is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) serverName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsServerSocketListen ERROR: Could not find socket %s\n", serverName);
+        return -1;
+    }
+    int32_t status;
+    int32_t sockfd = osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i;
+
+    status = listen(sockfd, SOMAXCONN);
+    if (status == -1) {
+        printf("osToolsServerSocketListen ERROR: Listen failed\n");
+        return -1;
+    }
+    struct sockaddr_in address;
+    uint32_t addressLen = sizeof(address);
+    int32_t connectionfd = accept(sockfd, (struct sockaddr *) &address, &addressLen);
+    if (connectionfd == -1) {
+        printf("osToolsServerSocketListen ERROR: Accept failed\n");
+        return -1;
+    }
+    uint8_t ipAddress[4] = {0};
+    if (osToolsGetIP(inet_ntoa(address.sin_addr), ipAddress, 4) != 4) {
+        printf("osToolsServerSocketListen ERROR: Invalid ip address\n");
+    }
+    printf("Incoming connection from %s:%d\n", inet_ntoa(address.sin_addr), address.sin_port);
+    list_append(osToolsSocket.socket, (unitype) clientName, 's');
+    list_append(osToolsSocket.socket, (unitype) connectionfd, 'i'); // socket
+    list_append(osToolsSocket.socket, (unitype) 1, 'i'); // client specifier
+    list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
+    list_append(osToolsSocket.socket, osToolsSocket.socket -> data[socketIndex + OSI_PROTOCOL], 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[3], 'i'); // address[3]
+    for (int32_t i = 4; i < 16; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // address padding
+    }
+    list_append(osToolsSocket.socket, (unitype) address.sin_port, 'i'); // port
+    for (int32_t i = 0; i < 10; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved padding
+    }
+    return 0;
+}
+
+int32_t osToolsClientSocketCreate(char *clientName, osToolsSocketProtocol_t protocol, char *serverAddress, char *serverPort, int32_t timeoutMilliseconds) {
+    if (!clientName) {
+        printf("osToolsClientSocketCreate ERROR: clientName is NULL\n");
+        return -1;
+    }
+    if (!serverAddress) {
+        printf("osToolsClientSocketCreate ERROR: serverAddress is NULL\n");
+        return -1;
+    }
+    if (!serverPort) {
+        printf("osToolsClientSocketCreate ERROR: port is NULL\n");
+        return -1;
+    }
+    uint8_t ipAddress[4] = {0};
+    if (osToolsGetIP(serverAddress, ipAddress, 4) != 4) {
+        printf("osToolsClientSocketCreate ERROR: Invalid ip address\n");
+        return -1;
+    }
+    int32_t status;
+    /* Create client socket */
+    struct addrinfo *result;
+    struct addrinfo hints;
+    for (int32_t i = 0; i < sizeof(hints); i++) {
+        *((((uint8_t *) &hints) + i)) = 0; // bzero
+    }
+    hints.ai_family = AF_INET; // IPv4
+    hints.ai_socktype = SOCK_STREAM;
+    if (protocol == OSTOOLS_PROTOCOL_TCP) {
+        hints.ai_protocol = IPPROTO_TCP;
+    } else if (protocol == OSTOOLS_PROTOCOL_UDP) {
+        hints.ai_protocol = IPPROTO_UDP;
+    }
+
+    status = getaddrinfo(serverAddress, serverPort, &hints, &result);
+    if (status != 0) {
+        printf("osToolsClientSocketCreate ERROR: Could not getaddrinfo of %s:%s, failed with %d\n", serverAddress, serverPort, status);
+        return -1;
+    }
+
+    struct addrinfo *resultElement = result;
+    while (resultElement) {
+        // printf("Connecting to %s:%s\n", serverAddress, serverPort);
+        resultElement = resultElement -> ai_next;
+    }
+    if (result == NULL) {
+        printf("osToolsClientSocketCreate ERROR: getaddrinfo returned NULL\n");
+        return -1;
+    }
+    /* Use the first element of linked list returned by getaddrinfo */
+    int32_t sockfd = socket(result -> ai_family, result -> ai_socktype, result -> ai_protocol);
+    if (sockfd == -1) {
+        freeaddrinfo(result);
+        printf("osToolsClientSocketCreate ERROR: Could not create socket\n");
+        return -1;
+    }
+    /* set socket to non blocking mode while connecting - https://stackoverflow.com/questions/1543466/how-do-i-change-a-tcp-socket-to-be-non-blocking */
+    status = fcntl(sockfd, F_GETFL, 0);
+    if (status == -1) {
+        printf("osToolsClientSocketCreate ERROR: Could not get fcntl flags\n");
+        return -1;
+    }
+    status &= O_NONBLOCK;
+    status = fcntl(sockfd, F_SETFL, status);
+    if (status != 0) {
+        printf("osToolsClientSocketCreate ERROR: Could not set socket to non-blocking mode\n");
+        return -1;
+    }
+    status = connect(sockfd, result -> ai_addr, (int32_t) result -> ai_addrlen);
+    if (status == -1) {
+        if (errno != EINPROGRESS) {
+            printf("osToolsClientSocketCreate ERROR: Could not connect socket %d (%s)\n", errno, strerror(errno));
+            return -1;
+        }
+        struct timeval timeout;
+        timeout.tv_sec = timeoutMilliseconds / 1000;
+        timeoutMilliseconds -= (timeoutMilliseconds / 1000) * 1000;
+        timeout.tv_usec = timeoutMilliseconds * 1000;
+        fd_set fdsockArray;
+        fdsockArray.fds_bits[0] = sockfd;
+        status = select(sockfd + 1, NULL, &fdsockArray, NULL, &timeout);
+        if (status != 1) {
+            printf("osToolsClientSocketCreate ERROR: Could not connect socket (timeout)\n");
+            return -1;
+        }
+    }
+    /* set socket back to blocking mode */
+    status = fcntl(sockfd, F_GETFL, 0);
+    if (status == -1) {
+        printf("osToolsClientSocketCreate ERROR: Could not get fcntl flags\n");
+        return -1;
+    }
+    status &= ~O_NONBLOCK;
+    status = fcntl(sockfd, F_SETFL, status);
+    if (status != 0) {
+        printf("osToolsClientSocketCreate ERROR: Could not set socket to blocking mode\n");
+        return -1;
+    }
+    printf("Connected to %s:%s\n", serverAddress, serverPort);
+    list_append(osToolsSocket.socket, (unitype) clientName, 's');
+    list_append(osToolsSocket.socket, (unitype) sockfd, 'l'); // socket
+    list_append(osToolsSocket.socket, (unitype) 1, 'i'); // client specifier
+    list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved
+    list_append(osToolsSocket.socket, (unitype) (int32_t) protocol, 'i'); // protocol
+    list_append(osToolsSocket.socket, (unitype) ipAddress[0], 'i'); // address[0]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[1], 'i'); // address[1]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[2], 'i'); // address[2]
+    list_append(osToolsSocket.socket, (unitype) ipAddress[3], 'i'); // address[3]
+    for (int32_t i = 4; i < 16; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // address padding
+    }
+    int32_t port;
+    sscanf(serverPort, "%d", &port);
+    list_append(osToolsSocket.socket, (unitype) port, 'i'); // port
+    for (int32_t i = 0; i < 10; i++) {
+        list_append(osToolsSocket.socket, (unitype) 0, 'i'); // reserved padding
+    }
+    return 0;
+}
+
+int32_t osToolsSocketSend(char *socketName, uint8_t *data, int32_t length) {
+    if (!socketName) {
+        printf("osToolsSocketSend ERROR: socketName is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) socketName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsSocketSend ERROR: Could not find socket %s\n", socketName);
+        return -1;
+    }
+    int32_t status = send(osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i, (char *) data, length, 0);
+    if (status == -1) {
+        printf("osToolsSocketSend ERROR: Failed to send\n");
+        return -1;
+    }
+    return status;
+}
+
+int32_t osToolsSocketReceive(char *socketName, uint8_t *data, int32_t length, int32_t timeoutMilliseconds) {
+    if (!socketName) {
+        printf("osToolsSocketReceive ERROR: socketName is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) socketName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsSocketReceive ERROR: Could not find socket %s\n", socketName);
+        return -1;
+    }
+    setsockopt(osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeoutMilliseconds, sizeof(timeoutMilliseconds)); // https://stackoverflow.com/questions/2876024/linux-is-there-a-read-or-recv-from-socket-with-timeout
+    int32_t status = recv(osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i, (char *) data, length, 0);
+    if (status == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            /* timeout */
+            printf("osToolsSocketReceive ERROR: Failed to receive (timeout)\n");
+            return 0;
+        }
+        printf("osToolsSocketReceive ERROR: Failed to receive\n");
+        return -1;
+    }
+    return status;
+}
+
+int32_t osToolsSocketDestroy(char *socketName) {
+    if (!socketName) {
+        printf("osToolsSocketDestroy ERROR: socketName is NULL\n");
+        return -1;
+    }
+    int32_t socketIndex = list_find(osToolsSocket.socket, (unitype) socketName, 's');
+    if (socketIndex == -1) {
+        printf("osToolsSocketDestroy ERROR: Could not find socket %s\n", socketName);
+        return -1;
+    }
+    /* shutdown and close socket */
+    int32_t status = shutdown(osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i, SHUT_RDWR);
+    if (status == -1) {
+        printf("osToolsSocketDestroy WARN: Shutdown not successful\n");
+    }
+    close(osToolsSocket.socket -> data[socketIndex + OSI_SOCKET].i);
+    list_delete_range(osToolsSocket.socket, socketIndex, socketIndex + OSI_NUMBER_OF_FIELDS);
+    return 0;
+}
+
+#endif /* TURTLE_ENABLE_SOCKETS */
+
+#ifdef TURTLE_ENABLE_CAMERA
+
+list_t *osToolsCameraList() {
+    list_t *output = list_init();
+    return output;
+}
+
+int32_t osToolsCameraOpen(char *name) {
+    return -1;
+}
+
+int32_t osToolsCameraReceive(char *name, uint8_t *data) {
+    return -1;
+}
+
+int32_t osToolsCameraClose(char *name) {
+    return -1;
+}
+
+#endif /* TURTLE_ENABLE_CAMERA */
+
+#endif /* OS_BROWSER */
 
 /* created using https://notisrac.github.io/FileToCArray (32 bit RGBA) */
 const uint32_t moveCursorData[1024] = {
