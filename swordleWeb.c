@@ -812,6 +812,10 @@ void mouseTick() {
     if (turtleMouseDown()) {
         if (self.keys[S_KEY_LMB] == 0) {
             self.keys[S_KEY_LMB] = 1;
+        }
+    } else {
+        if (self.keys[S_KEY_LMB]) {
+            self.keys[S_KEY_LMB] = 0;
             if (self.mouseIndex != -1 && self.canvas[self.mouseIndex * 2] != 0) {
                 self.canvas[self.mouseIndex * 2 + 1]--;
                 if (self.canvas[self.mouseIndex * 2 + 1] < SWORDLE_COLOR_GREEN) {
@@ -850,8 +854,6 @@ void mouseTick() {
                 }
             }
         }
-    } else {
-        self.keys[S_KEY_LMB] = 0;
     }
     if (turtleKeyPressed(GLFW_KEY_ENTER)) {
         if (self.keys[S_KEY_ENTER] == 0) {
