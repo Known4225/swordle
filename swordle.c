@@ -62,6 +62,8 @@ typedef struct {
     tt_switch_t *hardModeSwitch; // hard mode switch
     tt_switch_t *twoLayerSwitch; // search two layers
     tt_switch_t *killerMoveSwitch; // instead of using variance heuristic, use mode of remaining words = 1
+    /* getPossibleWords */
+    uint32_t lookup[26];
     /* sidebars */
     double bestX;
     int32_t bestIndex;
@@ -185,6 +187,10 @@ void init() {
     self.canvasPossible = list_init();
     self.canvasGuesses = list_init();
     self.best = list_init();
+    /* getPossibleWords */
+    for (int32_t i = 0; i < 26; i++) {
+        self.lookup[i] = pow(2, i);
+    }
     /* sidebars */
     self.bestX = -250;
     self.bestIndex = 0;
@@ -245,10 +251,6 @@ void swordleUnicodeCallback(uint32_t codepoint) {
 int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
-    uint32_t lookup[26];
-    for (int32_t i = 0; i < 26; i++) {
-        lookup[i] = pow(2, i);
-    }
     uint32_t whitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF}; // so i just learned today that you can only do one of these when it is 0
     for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
@@ -263,7 +265,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
-                    whitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    whitelist[i] = self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:;
                     for (int32_t k = 0; k < i; k++) {
@@ -272,11 +274,11 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                             return 0;
                         }
                     }
-                    currentCount[canvas[j * 10 + i * 2] - 'A']++;
-                    whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    currentCount[canvas[j * 10 + i * 2] - 'A']++; // cannot ever have currentCountDirection set as a black letter can never proceed a yellow letter
+                    whitelist[i] &= ~self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_GREY:;
-                    uint32_t blacklist = ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    uint32_t blacklist = ~self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                     int32_t startingIndex = i;
                     if (currentCount[canvas[j * 10 + i * 2] - 'A'] == 0) {
                         for (int32_t k = 0; k < 5; k++) {
@@ -284,7 +286,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                         }
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A'] *= -1;
-                        whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A'];
+                        whitelist[i] &= ~self.lookup[canvas[j * 10 + i * 2] - 'A'];
                     }
                 break;
                 default:
@@ -292,7 +294,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
             }
         }
         for (int32_t i = 0; i < 26; i++) {
-            if (count[i] >= 0 && abs(currentCount[i]) > count[i]) {
+            if (count[i] >= 0 && abs(currentCount[i]) >= count[i]) {
                 count[i] = currentCount[i];
             }
         }
@@ -307,7 +309,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
         /* check whitelist */
         for (int32_t j = 0; j < 5; j++) {
             currentCount[word[j] - 'A']++;
-            if ((whitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+            if ((whitelist[j] & self.lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
                 good = 0;
                 break;
             }
@@ -338,10 +340,6 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
 int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet) {
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
-    uint32_t lookup[26];
-    for (int32_t i = 0; i < 26; i++) {
-        lookup[i] = pow(2, i);
-    }
     uint32_t hardModeWhitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF};
     for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
@@ -356,7 +354,7 @@ int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
-                    hardModeWhitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    hardModeWhitelist[i] = self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:;
                     for (int32_t k = 0; k < i; k++) {
@@ -393,7 +391,7 @@ int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet
         /* check whitelist */
         for (int32_t j = 0; j < 5; j++) {
             currentCount[word[j] - 'A']++;
-            if ((hardModeWhitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+            if ((hardModeWhitelist[j] & self.lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
                 good = 0;
                 break;
             }

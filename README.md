@@ -29,6 +29,7 @@ MAULS (BGBYB)
 - Make two layer deep heuristic more scientific (multiplying variances together not a good method)
 - Optimize the program so it runs faster - Create a separate thread per word checked in bestWord?
 - Save and load files?
+- Could precalculate all words' currentCount so it doesn't have to recalculate it so much - then loop unroll the whitelist check for insane speed
 
 # Images
 
