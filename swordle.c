@@ -1024,16 +1024,16 @@ void parseRibbonOutput() {
         if (tt_ribbon.output[2] == 1) { // Change theme
             printf("Change theme\n");
             if (tt_theme == TT_THEME_DARK) {
-                turtleBgColor(36, 30, 32);
+                turtleBackgroundColor(36, 30, 32);
                 turtleToolsSetTheme(TT_THEME_COLT);
             } else if (tt_theme == TT_THEME_COLT) {
-                turtleBgColor(212, 201, 190);
+                turtleBackgroundColor(212, 201, 190);
                 turtleToolsSetTheme(TT_THEME_NAVY);
             } else if (tt_theme == TT_THEME_NAVY) {
-                turtleBgColor(255, 255, 255);
+                turtleBackgroundColor(255, 255, 255);
                 turtleToolsSetTheme(TT_THEME_LIGHT);
             } else if (tt_theme == TT_THEME_LIGHT) {
-                turtleBgColor(30, 30, 30);
+                turtleBackgroundColor(30, 30, 30);
                 turtleToolsSetTheme(TT_THEME_DARK);
             }
         } 
