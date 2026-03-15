@@ -1053,95 +1053,6 @@ void mouseTick() {
     }
 }
 
-void parseRibbonOutput() {
-    if (tt_ribbon.output[0] == 0) {
-        return;
-    }
-    tt_ribbon.output[0] = 0;
-    if (tt_ribbon.output[1] == 0) { // File
-        if (tt_ribbon.output[2] == 1) { // New
-            list_clear(osToolsFileDialog.selectedFilenames);
-            /* initialise canvas */
-            for (int32_t i = 0; i < 60; i += 2) {
-                self.canvas[i] = 0;
-                self.canvas[i + 1] = SWORDLE_COLOR_BORDER_HIGHLIGHT;
-            }
-            self.cursorIndex = 0;
-            list_clear(self.best);
-            fillBest();
-            list_clear(self.canvasPossible);
-            list_clear(self.canvasGuesses);
-            self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
-            self.possibleScrollbar -> value = 0;
-            self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
-            self.bestScrollbar -> value = 0;
-        }
-        if (tt_ribbon.output[2] == 2) { // Save
-            if (osToolsFileDialog.selectedFilenames -> length == 0) {
-                if (osToolsFileDialogSave(OSTOOLS_FILE_DIALOG_FILE, "Save.txt", NULL) != -1) {
-                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilenames -> data[0].s);
-                }
-            } else {
-                printf("Saved to: %s\n", osToolsFileDialog.selectedFilenames -> data[0].s);
-            }
-        }
-        if (tt_ribbon.output[2] == 3) { // Save As...
-            list_clear(osToolsFileDialog.selectedFilenames);
-            if (osToolsFileDialogSave(OSTOOLS_FILE_DIALOG_FILE, "Save.txt", NULL) != -1) {
-                printf("Saved to: %s\n", osToolsFileDialog.selectedFilenames -> data[0].s);
-            }
-        }
-        if (tt_ribbon.output[2] == 4) { // Open
-            list_clear(osToolsFileDialog.selectedFilenames);
-            if (osToolsFileDialogOpen(OSTOOLS_FILE_DIALOG_MULTIPLE_SELECT, OSTOOLS_FILE_DIALOG_FILE, "", NULL) != -1) {
-                printf("Loaded data from: ");
-                list_print(osToolsFileDialog.selectedFilenames);
-            }
-        }
-    }
-    if (tt_ribbon.output[1] == 1) { // Edit
-        if (tt_ribbon.output[2] == 1) { // Undo
-            printf("Undo\n");
-        }
-        if (tt_ribbon.output[2] == 2) { // Redo
-            printf("Redo\n");
-        }
-        if (tt_ribbon.output[2] == 3) { // Cut
-            osToolsClipboardSetText("test123");
-            printf("Cut \"test123\" to clipboard!\n");
-        }
-        if (tt_ribbon.output[2] == 4) { // Copy
-            osToolsClipboardSetText("test345");
-            printf("Copied \"test345\" to clipboard!\n");
-        }
-        if (tt_ribbon.output[2] == 5) { // Paste
-            osToolsClipboardGetText();
-            printf("Pasted \"%s\" from clipboard!\n", osToolsClipboard.text);
-        }
-    }
-    if (tt_ribbon.output[1] == 2) { // View
-        if (tt_ribbon.output[2] == 1) { // Change theme
-            printf("Change theme\n");
-            if (tt_theme == TT_THEME_DARK) {
-                turtleBackgroundColor(36, 30, 32);
-                turtleToolsSetTheme(TT_THEME_COLT);
-            } else if (tt_theme == TT_THEME_COLT) {
-                turtleBackgroundColor(212, 201, 190);
-                turtleToolsSetTheme(TT_THEME_NAVY);
-            } else if (tt_theme == TT_THEME_NAVY) {
-                turtleBackgroundColor(255, 255, 255);
-                turtleToolsSetTheme(TT_THEME_LIGHT);
-            } else if (tt_theme == TT_THEME_LIGHT) {
-                turtleBackgroundColor(30, 30, 30);
-                turtleToolsSetTheme(TT_THEME_DARK);
-            }
-        } 
-        if (tt_ribbon.output[2] == 2) { // GLFW
-            printf("GLFW settings\n");
-        } 
-    }
-}
-
 void defaultUISetup() {
     /* canvas */
     self.canvasX = -73.5;
@@ -1173,14 +1084,17 @@ void defaultUISetup() {
     self.hardModeSwitch -> x = 166;
     self.hardModeSwitch -> y = 160;
     self.hardModeSwitch -> size = 6;
+    strcpy(self.hardModeSwitch -> label, "Hard Mode");
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
     self.twoLayerSwitch -> x = 166;
     self.twoLayerSwitch -> y = 150;
     self.twoLayerSwitch -> size = 6;
+    strcpy(self.twoLayerSwitch -> label, "Two Layer Search");
     self.twoLayerSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
     self.killerMoveSwitch -> x = 166;
     self.killerMoveSwitch -> y = 140;
     self.killerMoveSwitch -> size = 6;
+    strcpy(self.killerMoveSwitch -> label, "Killer Move Heuristic");
     self.killerMoveSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
     /* turtle */
     turtleSetResizeMode(TURTLE_RESIZE_MODE_PAD);
@@ -1215,18 +1129,21 @@ void phoneUISetup() {
     self.possibleScrollbar -> size = self.possibleWidth * 0.6 / 7.0;
     /* ui */
     self.hardModeSwitch -> x = 300;
-    self.hardModeSwitch -> y = 120;
-    self.hardModeSwitch -> size = 10;
+    self.hardModeSwitch -> y = 110;
+    self.hardModeSwitch -> size = 20;
+    strcpy(self.hardModeSwitch -> label, "");
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
     self.hardModeSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
     self.twoLayerSwitch -> x = 300;
-    self.twoLayerSwitch -> y = 120 - 35;
-    self.twoLayerSwitch -> size = 10;
+    self.twoLayerSwitch -> y = 110 - 64;
+    self.twoLayerSwitch -> size = 20;
+    strcpy(self.twoLayerSwitch -> label, "");
     self.twoLayerSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
     self.twoLayerSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
     self.killerMoveSwitch -> x = 300;
-    self.killerMoveSwitch -> y = 120 - 35 - 35;
-    self.killerMoveSwitch -> size = 10;
+    self.killerMoveSwitch -> y = 110 - 64 - 64;
+    self.killerMoveSwitch -> size = 20;
+    strcpy(self.killerMoveSwitch -> label, "");
     self.killerMoveSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
     self.killerMoveSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
     /* turtle */
@@ -1244,6 +1161,8 @@ int main(int argc, char *argv[]) {
 
     /* initialise turtle */
     turtleInit(window, -320, -180, 320, 180);
+    turtleBackgroundColor(30, 30, 30);
+    turtleToolsSetTheme(TT_THEME_DARK); // dark theme preset
 
     /* initialise osTools */
     osToolsInit(argv[0], window); // must include argv[0] to get executableFilepath, must include GLFW window for copy paste and cursor functionality
@@ -1253,11 +1172,6 @@ int main(int argc, char *argv[]) {
     strcpy(constructedFilepath, osToolsFileDialog.executableFilepath);
     strcat(constructedFilepath, "config/roberto.tgl");
     turtleTextInit(constructedFilepath);
-    /* initialise turtleTools ribbon */
-    turtleToolsSetTheme(TT_THEME_DARK); // dark theme preset
-    strcpy(constructedFilepath, osToolsFileDialog.executableFilepath);
-    strcat(constructedFilepath, "config/ribbonConfig.txt");
-    // tt_ribbonInit(constructedFilepath);
 
     init();
 
@@ -1272,7 +1186,12 @@ int main(int argc, char *argv[]) {
         renderCanvas();
         mouseTick();
         turtleToolsUpdate(); // update turtleTools
-        // parseRibbonOutput(); // user defined function to use ribbon
+        if (self.uiMode == 1) {
+            tt_setColor(TT_COLOR_TEXT);
+            turtleTextWriteString("Hard Mode", self.hardModeSwitch -> x, self.hardModeSwitch -> y + 25, 9, 100);
+            turtleTextWriteString("Two Layer Search", self.twoLayerSwitch -> x, self.twoLayerSwitch -> y + 25, 9, 100);
+            turtleTextWriteString("Killer Move Heuristic", self.killerMoveSwitch -> x, self.killerMoveSwitch -> y + 25, 9, 100);
+        }
         turtleUpdate(); // update the screen
         #ifdef OS_BROWSER
         solve();
