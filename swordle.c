@@ -48,6 +48,7 @@ typedef enum {
 typedef struct {
     char canvas[60]; // character, colour, character, color, ...
     double colors[90]; // refer to swordle_color_t
+    int8_t uiMode; // 0 - default (wide mode), 1 - narrow mode (phone)
     double canvasX; // x position of canvas (top left corner)
     double canvasY; // y position of canvas (top left corner)
     double dropX; // canvas X coordinates per letter
@@ -68,11 +69,15 @@ typedef struct {
     uint32_t lookup[26];
     /* sidebars */
     double bestX;
+    double bestY;
+    double bestWidth;
     int32_t bestIndex;
     double bestOffset;
     tt_scrollbar_t *bestScrollbar;
     int8_t bestTouchScroll;
     double possibleX;
+    double possibleY;
+    double possibleWidth;
     int32_t possibleIndex;
     double possibleOffset;
     tt_scrollbar_t *possibleScrollbar;
@@ -90,6 +95,7 @@ typedef struct {
     char keyboardColors[28]; // colors of each key in order
     int32_t keyIndex; // canvas hover index
     /* solver thread */
+    int32_t solveCount; // buffer a few frames so rendering catches up
     volatile int8_t solving;
     volatile int8_t solverThreadExists;
     volatile double progressBest;
@@ -100,6 +106,7 @@ typedef struct {
 swordle_t self;
 
 void init() {
+    self.uiMode = 0;
     /* initialise canvas */
     for (int32_t i = 0; i < 60; i += 2) {
         self.canvas[i] = 0;
@@ -198,20 +205,24 @@ void init() {
     }
     /* sidebars */
     self.bestX = -250;
+    self.bestY = 160;
+    self.bestWidth = 70;
     self.bestIndex = 0;
     self.bestOffset = 0;
-    self.bestScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.bestX + 62, -20, 6, 306, 50);
+    self.bestScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.bestX + self.bestWidth * 6.2 / 7.0, self.bestY - 170, 6, 306, 50);
     self.bestTouchScroll = 0;
     self.possibleX = 250;
+    self.possibleY = 160;
+    self.possibleWidth = 70;
     self.possibleIndex = 0;
     self.possibleOffset = 0;
-    self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
+    self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + self.possibleWidth * 6.2 / 7.0, self.possibleY - 170, 6, 306, 50);
     self.possibleTouchScroll = 0;
-    self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
+    self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, 166, 160, 6);
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
-    self.twoLayerSwitch = tt_switchInit("Two Layer Search", NULL, self.possibleX - 84, 150, 6);
+    self.twoLayerSwitch = tt_switchInit("Two Layer Search", NULL, 166, 150, 6);
     self.twoLayerSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
-    self.killerMoveSwitch = tt_switchInit("Killer Move Heuristic", NULL, self.possibleX - 84, 140, 6);
+    self.killerMoveSwitch = tt_switchInit("Killer Move Heuristic", NULL, 166, 140, 6);
     self.killerMoveSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
 
     /* solver thread */
@@ -573,22 +584,26 @@ void solve() {
         list_clear(self.canvasPossible);
         getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
         self.solving = SOLVE_GET_BEST_WORDS;
+        self.solveCount = 0;
     } else if (self.solving == SOLVE_GET_BEST_WORDS) {
-        if (self.canvasPossible -> length == 0) {
-            printf("No Possible Words\n");
-            list_clear(self.best);
-        } else {
-            if (self.hardModeSwitch -> value) {
-                list_clear(self.canvasGuesses);
-                getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
+        self.solveCount++;
+        if (self.solveCount > 10) {
+            if (self.canvasPossible -> length == 0) {
+                printf("No Possible Words\n");
                 list_clear(self.best);
-                bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
             } else {
-                list_clear(self.best);
-                bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
+                if (self.hardModeSwitch -> value) {
+                    list_clear(self.canvasGuesses);
+                    getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
+                    list_clear(self.best);
+                    bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
+                } else {
+                    list_clear(self.best);
+                    bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
+                }
             }
+            self.solving = SOLVE_NOT_SOLVING;
         }
-        self.solving = SOLVE_NOT_SOLVING;
     }
 }
 #endif /* OS_BROWSER */
@@ -617,8 +632,8 @@ void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double r
 
 void renderCanvas() {
     /* render mouse position */
-    tt_setColor(TT_COLOR_TEXT);
-    turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
+    // tt_setColor(TT_COLOR_TEXT);
+    // turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf %d", turtle.mouseX, turtle.mouseY, turtleMouseDown());
     self.mouseIndex = -1;
     /* render canvas */
     double ypos = self.canvasY;
@@ -712,8 +727,8 @@ void renderCanvas() {
             swordle_setColor(SWORDLE_COLOR_KEYBOARD);
             turtleRoundedRectangle(xpos, ypos, xpos + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage), ypos + self.keyDropY * self.keyPercentage, self.keyDropX / 10);
             swordle_setColor(SWORDLE_COLOR_TEXT);
-            turtlePenSize(1);
-            double symbolSize = 4;
+            turtlePenSize(1.0 / 35.23 * self.keyDropSpecialX);
+            double symbolSize = 4.0 / 35.23 * self.keyDropSpecialX;
             double centerX = (xpos * 2 + self.keyDropSpecialX - self.keyDropX * (1 - self.keyPercentage)) / 2 - symbolSize * 0.75;
             double centerY = (ypos * 2 + self.keyDropY * self.keyPercentage) / 2;
             turtleGoto(centerX - symbolSize * 0.75, centerY);
@@ -753,93 +768,101 @@ void renderCanvas() {
 
 void renderResults() {
     double xpos = self.bestX;
-    double ypos = 150;
+    double ypos = self.bestY;
+    double width = self.bestWidth;
+    double approximateDisplay = 2000 / width - 2.5;
     swordle_setColor(SWORDLE_COLOR_SIDEBAR);
-    turtleRectangle(-320, -180, xpos + 70, 180);
+    turtleRectangle(xpos - width, self.bestY - 340, xpos + width, self.bestY + 30);
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS || self.solving == SOLVE_GET_BEST_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
         int32_t splitter = self.tick % 400;
         if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching", xpos, self.bestY - 140, 10, 50);
         } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching.", xpos, self.bestY - 140, 10, 50);
         } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching..", xpos, self.bestY - 140, 10, 50);
         } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching...", xpos, self.bestY - 140, 10, 50);
         }
+        #ifndef OS_BROWSER
         swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
+        turtleRectangle(xpos - width * 4.0 / 7.0, self.bestY - 160, xpos + width * 4.0 / 7.0, self.bestY - 150);
         swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressBest, -1);
+        turtleRectangle(xpos - width * 3.9 / 7.0, self.bestY - 159, xpos - width * 3.9 / 7.0 + width * 7.8 / 7.0 * self.progressBest, self.bestY - 151);
+        #endif /* OS_BROWSER */
     } else {
         if (self.best -> length == 0) {
             swordle_setColor(SWORDLE_COLOR_TEXT);
-            turtleTextWriteString("No Best Words", xpos, 0, 10, 50);
+            turtleTextWriteString("No Best Words", xpos, self.bestY - 150, width * 1.0 / 7.0, 50);
             self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
         } else {
             swordle_setColor(SWORDLE_COLOR_TEXT);
-            ypos -= 20;
+            ypos -= width * 2.0 / 7.0;
             self.bestIndex = 0;
             self.bestOffset = 0;
             int32_t bestLength = self.best -> length / 2;
-            if (bestLength > 26 * 2) {
+            if (bestLength > approximateDisplay * 2) {
                 self.bestScrollbar -> enabled = TT_ELEMENT_ENABLED;
-                self.bestScrollbar -> barPercentage = 100 / (bestLength / 26.0);
-                double divisor = bestLength * 100.0 / (bestLength - 26);
-                self.bestOffset = self.bestScrollbar -> value * bestLength / divisor * 12;
-                while (self.bestOffset > 12) {
-                    self.bestOffset -= 12;
+                self.bestScrollbar -> barPercentage = 100 / (bestLength / approximateDisplay);
+                double divisor = bestLength * 100.0 / (bestLength - approximateDisplay);
+                self.bestOffset = self.bestScrollbar -> value * bestLength / divisor * width * 1.2 / 7.0;
+                while (self.bestOffset > width * 1.2 / 7.0) {
+                    self.bestOffset -= width * 1.2 / 7.0;
                     self.bestIndex += 2;
                 }
             } else {
                 self.bestScrollbar -> enabled = TT_ELEMENT_HIDE;
             }
             ypos += self.bestOffset;
-            int32_t bestEnding = self.bestIndex + 60;
+            int32_t bestEnding = self.bestIndex + approximateDisplay * 2 + 6;
             if (bestEnding > self.best -> length) {
                 bestEnding = self.best -> length;
             }
             for (int32_t i = self.bestIndex; i < bestEnding; i += 2) {
-                turtleTextWriteString(self.best -> data[i].s, xpos - 30, ypos, 6, 50);
-                turtleTextWriteStringf(xpos + 30, ypos, 6, 50, "%.3lf", self.best -> data[i + 1].d);
-                ypos -= 12;
+                turtleTextWriteString(self.best -> data[i].s, xpos - width * 3.0 / 7.0, ypos, width * 0.6 / 7.0, 50);
+                turtleTextWriteStringf(xpos + width * 3.0 / 7.0, ypos, width * 0.6 / 7.0, 50, "%.3lf", self.best -> data[i + 1].d);
+                ypos -= width * 1.2 / 7.0;
             }
             swordle_setColor(SWORDLE_COLOR_SIDEBAR);
-            turtleRectangle(-320, 150 - 16, xpos + 70, 180);
+            turtleRectangle(xpos - width, self.bestY - 16, xpos + width, self.bestY + 30);
             swordle_setColor(SWORDLE_COLOR_TEXT);
-            turtleTextWriteString("Best", xpos - 30, 150, 10, 50);
-            turtleTextWriteString("Variance", xpos + 30, 150, 10, 50);
+            turtleTextWriteString("Best", xpos - width * 3.0 / 7.0, self.bestY, width * 1.0 / 7.0, 50);
+            turtleTextWriteString("Variance", xpos + width * 3.0 / 7.0, self.bestY, width * 1.0 / 7.0, 50);
         }
     }
+    tt_setColor(TT_COLOR_BACKGROUND);
+    turtleRectangle(xpos - width, self.bestY - 340, xpos + width, self.bestY - 400);
     xpos = self.possibleX;
-    ypos = 150;
+    ypos = self.possibleY;
+    width = self.possibleWidth;
+    approximateDisplay = 2000 / width - 2.5;
     swordle_setColor(SWORDLE_COLOR_SIDEBAR);
-    turtleRectangle(320, -180, xpos - 70, 180);
+    turtleRectangle(xpos + width, self.possibleY - 340, xpos - width, self.possibleY + 30);
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
         int32_t splitter = self.tick % 400;
         if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching", xpos, self.possibleY - 140, 10, 50);
         } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching.", xpos, self.possibleY - 140, 10, 50);
         } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching..", xpos, self.possibleY - 140, 10, 50);
         } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
+            turtleTextWriteString("Searching...", xpos, self.possibleY - 140, 10, 50);
         }
         swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
+        turtleRectangle(xpos - width * 4.0 / 7.0, self.possibleY - 160, xpos + width * 4.0 / 7.0, self.possibleY - 150);
         swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressPossible, -1);
+        turtleRectangle(xpos - width * 3.9 / 7.0, self.possibleY - 159, xpos - width * 3.9 / 7.0 + width * 7.8 / 7.0 * self.progressPossible, self.possibleY - 151);
     } else {
         list_t *selectList;
         if (self.canvasPossible -> length == 0) {
             if (self.best -> length == 0) {
                 swordle_setColor(SWORDLE_COLOR_TEXT);
-                turtleTextWriteString("No Possible Words", xpos, 0, 10, 50);
+                turtleTextWriteString("No Possible Words", xpos, self.possibleY - 150, 10, 50);
                 return;
             }
             selectList = self.possibleWords;
@@ -847,35 +870,37 @@ void renderResults() {
             selectList = self.canvasPossible;
         }
         swordle_setColor(SWORDLE_COLOR_TEXT);
-        ypos -= 20;
+        ypos -= width * 2.0 / 7.0;;
         self.possibleIndex = 0;
         self.possibleOffset = 0;
-        if (selectList -> length > 26) {
+        if (selectList -> length > approximateDisplay) {
             self.possibleScrollbar -> enabled = TT_ELEMENT_ENABLED;
-            self.possibleScrollbar -> barPercentage = 100 / (selectList -> length / 26.0);
-            double divisor = selectList -> length * 100.0 / (selectList -> length - 26);
-            self.possibleOffset = self.possibleScrollbar -> value * selectList -> length / divisor * 12;
-            while (self.possibleOffset > 12) {
-                self.possibleOffset -= 12;
+            self.possibleScrollbar -> barPercentage = 100 / (selectList -> length / approximateDisplay);
+            double divisor = selectList -> length * 100.0 / (selectList -> length - approximateDisplay);
+            self.possibleOffset = self.possibleScrollbar -> value * selectList -> length / divisor * width * 1.2 / 7.0;
+            while (self.possibleOffset > width * 1.2 / 7.0) {
+                self.possibleOffset -= width * 1.2 / 7.0;
                 self.possibleIndex++;
             }
         } else {
             self.possibleScrollbar -> enabled = TT_ELEMENT_HIDE;
         }
         ypos += self.possibleOffset;
-        int32_t possibleEnding = self.possibleIndex + 30;
+        int32_t possibleEnding = self.possibleIndex + approximateDisplay + 3;
         if (possibleEnding > selectList -> length) {
             possibleEnding = selectList -> length;
         }
         for (int32_t i = self.possibleIndex; i < possibleEnding; i++) {
-            turtleTextWriteString(selectList -> data[i].s, xpos, ypos, 6, 50);
-            ypos -= 12;
+            turtleTextWriteString(selectList -> data[i].s, xpos, ypos, width * 0.6 / 7.0, 50);
+            ypos -= width * 1.2 / 7.0;;
         }
         swordle_setColor(SWORDLE_COLOR_SIDEBAR);
-        turtleRectangle(320, 150 - 16, xpos - 70, 180);
+        turtleRectangle(xpos + width, self.possibleY - 16, xpos - width, self.possibleY + 30);
         swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleTextWriteStringf(xpos, 150, 10, 50, "Possible (%d)", selectList -> length);
+        turtleTextWriteStringf(xpos, self.possibleY, width * 1.0 / 7.0, 50, "Possible (%d)", selectList -> length);
     }
+    tt_setColor(TT_COLOR_BACKGROUND);
+    turtleRectangle(xpos - width, self.possibleY - 340, xpos + width, self.possibleY - 400);
 }
 
 void mouseTick() {
@@ -919,11 +944,11 @@ void mouseTick() {
                     }
                 }
             }
-            if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+            if (turtle.mouseX < self.bestX + self.bestWidth * 5.0 / 7.0 && turtle.mouseX > self.bestX - self.bestWidth && turtle.mouseY > self.bestY - 340 && turtle.mouseY < self.bestY + 30) {
                 self.bestTouchScroll = 1;
                 self.touchScrollAnchor = turtle.mouseY;
             }
-            if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+            if (turtle.mouseX > self.possibleX - self.possibleWidth && turtle.mouseX < self.possibleX + self.possibleWidth * 5.0 / 7.0 && turtle.mouseY > self.possibleY - 340 && turtle.mouseY < self.possibleY + 30) {
                 self.possibleTouchScroll = 1;
                 self.touchScrollAnchor = turtle.mouseY;
             }
@@ -1000,26 +1025,26 @@ void mouseTick() {
     /* scrolling on sidebars */
     double scroll = turtleMouseWheel();
     if (scroll > 0) {
-        if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+        if (turtle.mouseX < self.bestX + self.bestWidth && turtle.mouseX > self.bestX - self.bestWidth) {
             self.bestScrollbar -> value -= self.bestScrollbar -> barPercentage / 25;
             if (self.bestScrollbar -> value < 0) {
                 self.bestScrollbar -> value = 0;
             }
         }
-        if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+        if (turtle.mouseX > self.possibleX - self.possibleWidth && turtle.mouseX < self.possibleX + self.possibleWidth) {
             self.possibleScrollbar -> value -= self.possibleScrollbar -> barPercentage / 25;
             if (self.possibleScrollbar -> value < 0) {
                 self.possibleScrollbar -> value = 0;
             }
         }
     } else if (scroll < 0) {
-        if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+        if (turtle.mouseX < self.bestX + self.bestWidth && turtle.mouseX > self.bestX - self.bestWidth) {
             self.bestScrollbar -> value += self.bestScrollbar -> barPercentage / 25;
             if (self.bestScrollbar -> value > 100) {
                 self.bestScrollbar -> value = 100;
             }
         }
-        if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+        if (turtle.mouseX > self.possibleX - self.possibleWidth && turtle.mouseX < self.possibleX + self.possibleWidth) {
             self.possibleScrollbar -> value += self.possibleScrollbar -> barPercentage / 25;
             if (self.possibleScrollbar -> value > 100) {
                 self.possibleScrollbar -> value = 100;
@@ -1117,9 +1142,101 @@ void parseRibbonOutput() {
     }
 }
 
+void defaultUISetup() {
+    /* canvas */
+    self.canvasX = -73.5;
+    self.canvasY = 150;
+    self.dropX = 30;
+    self.dropY = -30;
+    self.keyX[0] = -115;
+    self.keyX[1] = -103;
+    self.keyX[2] = -115;
+    self.keyY = -50;
+    self.keyDropX = 23.23;
+    self.keyDropY = -32;
+    self.keyDropSpecialX = 35.23;
+    self.keyPercentage = 0.87;
+    /* results */
+    self.bestX = -250;
+    self.bestY = 160;
+    self.bestWidth = 70;
+    self.bestScrollbar -> x = self.bestX + self.bestWidth * 6.2 / 7.0;
+    self.bestScrollbar -> y = self.bestY - 170;
+    self.bestScrollbar -> size = self.bestWidth * 0.6 / 7.0;
+    self.possibleX = 250;
+    self.possibleY = 160;
+    self.possibleWidth = 70;
+    self.possibleScrollbar -> x = self.possibleX + self.possibleWidth * 6.2 / 7.0;
+    self.possibleScrollbar -> y = self.possibleY - 170;
+    self.possibleScrollbar -> size = self.possibleWidth * 0.6 / 7.0;
+    /* ui */
+    self.hardModeSwitch -> x = 166;
+    self.hardModeSwitch -> y = 160;
+    self.hardModeSwitch -> size = 6;
+    self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
+    self.twoLayerSwitch -> x = 166;
+    self.twoLayerSwitch -> y = 150;
+    self.twoLayerSwitch -> size = 6;
+    self.twoLayerSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
+    self.killerMoveSwitch -> x = 166;
+    self.killerMoveSwitch -> y = 140;
+    self.killerMoveSwitch -> size = 6;
+    self.killerMoveSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
+    /* turtle */
+    turtleSetResizeMode(TURTLE_RESIZE_MODE_PAD);
+}
+
+void phoneUISetup() {
+    /* canvas */
+    self.canvasX = -170;
+    self.canvasY = 140;
+    self.dropX = 70;
+    self.dropY = -70;
+    self.keyX[0] = -230;
+    self.keyX[1] = -206;
+    self.keyX[2] = -230;
+    self.keyY = -290;
+    self.keyDropX = 46.46;
+    self.keyDropY = -64;
+    self.keyDropSpecialX = 70.46;
+    self.keyPercentage = 0.87;
+    /* results */
+    self.bestX = -160;
+    self.bestY = 500;
+    self.bestWidth = 155;
+    self.bestScrollbar -> x = self.bestX + self.bestWidth * 6.2 / 7.0;
+    self.bestScrollbar -> y = self.bestY - 170;
+    self.bestScrollbar -> size = self.bestWidth * 0.6 / 7.0;
+    self.possibleY = 500;
+    self.possibleX = 160;
+    self.possibleWidth = 155;
+    self.possibleScrollbar -> x = self.possibleX + self.possibleWidth * 6.2 / 7.0;
+    self.possibleScrollbar -> y = self.possibleY - 170;
+    self.possibleScrollbar -> size = self.possibleWidth * 0.6 / 7.0;
+    /* ui */
+    self.hardModeSwitch -> x = 300;
+    self.hardModeSwitch -> y = 120;
+    self.hardModeSwitch -> size = 10;
+    self.hardModeSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
+    self.hardModeSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
+    self.twoLayerSwitch -> x = 300;
+    self.twoLayerSwitch -> y = 120 - 35;
+    self.twoLayerSwitch -> size = 10;
+    self.twoLayerSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
+    self.twoLayerSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
+    self.killerMoveSwitch -> x = 300;
+    self.killerMoveSwitch -> y = 120 - 35 - 35;
+    self.killerMoveSwitch -> size = 10;
+    self.killerMoveSwitch -> style = TT_SWITCH_STYLE_CLASSIC;
+    self.killerMoveSwitch -> align = TT_SWITCH_ALIGN_RIGHT;
+    /* turtle */
+    turtleSetResizeMode(TURTLE_RESIZE_MODE_PAD_NO_BARS);
+}
+
 int main(int argc, char *argv[]) {
     /* create window */
     GLFWwindow *window = turtleCreateWindow(TURTLE_WINDOW_DEFAULT_WIDTH, TURTLE_WINDOW_DEFAULT_HEIGHT, "swordle");
+    glfwSetWindowSizeLimits(window, 100, 100, GLFW_DONT_CARE, GLFW_DONT_CARE);
     if (window == NULL) {
         return -1; // failed to create window
     }
@@ -1140,7 +1257,7 @@ int main(int argc, char *argv[]) {
     turtleToolsSetTheme(TT_THEME_DARK); // dark theme preset
     strcpy(constructedFilepath, osToolsFileDialog.executableFilepath);
     strcat(constructedFilepath, "config/ribbonConfig.txt");
-    tt_ribbonInit(constructedFilepath);
+    // tt_ribbonInit(constructedFilepath);
 
     init();
 
@@ -1151,15 +1268,26 @@ int main(int argc, char *argv[]) {
         start = clock();
         turtleGetMouseCoordinates();
         turtleClear();
-        renderCanvas();
         renderResults();
+        renderCanvas();
         mouseTick();
         turtleToolsUpdate(); // update turtleTools
-        parseRibbonOutput(); // user defined function to use ribbon
+        // parseRibbonOutput(); // user defined function to use ribbon
         turtleUpdate(); // update the screen
         #ifdef OS_BROWSER
         solve();
         #endif /* OS_BROWSER */
+        if ((double) turtle.screenbounds[0] / turtle.screenbounds[1] > 0.7) {
+            if (self.uiMode != 0) {
+                self.uiMode = 0;
+                defaultUISetup();
+            }
+        } else {
+            if (self.uiMode != 1) {
+                self.uiMode = 1;
+                phoneUISetup();
+            }
+        }
         end = clock();
         while ((double) (end - start) / CLOCKS_PER_SEC < (1.0 / tps)) {
             end = clock();
