@@ -649,7 +649,7 @@ void renderCanvas() {
                 break;
                 default:
                     swordle_setColor(SWORDLE_COLOR_BORDER_HIGHLIGHT);
-                    turtlePenSize(0.6);
+                    turtlePenSize(self.dropX * 0.6 / 30);
                     turtleGoto(xpos, ypos);
                     turtlePenDown();
                     turtleGoto(xpos + self.dropX * self.boxPercentage, ypos);
