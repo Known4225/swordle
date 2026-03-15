@@ -15,11 +15,11 @@ winlib:
 	gcc turtlelib.c -c -DTURTLE_IMPLEMENTATION -DTURTLE_TEXT_PRETTY_PEN -DOS_WINDOWS -O3 -o Windows/turtle.lib
 	rm turtlelib.c
 html:
-	emcc swordle.c --shell-file config/turtle_shell.html -sUSE_GLFW=3 -sMAX_WEBGL_VERSION=2 -sASYNCIFY -sINITIAL_MEMORY=1073741824 -sWASM=0 -DTURTLE_IMPLEMENTATION -DTURTLE_ENABLE_TEXTURES -DOS_BROWSER -Oz -o swordle.html --embed-file wordle-answers-alphabetical.txt --embed-file wordle-past-words-06.02.26.txt --embed-file wordle-valid-words.txt
+	emcc swordleWeb.c --shell-file config/turtle_shell.html -sUSE_GLFW=3 -sMAX_WEBGL_VERSION=2 -sASYNCIFY -sINITIAL_MEMORY=1073741824 -sWASM=0 -DTURTLE_IMPLEMENTATION -DTURTLE_ENABLE_TEXTURES -DOS_BROWSER -Oz -o swordle.html --embed-file wordle-answers-alphabetical.txt --embed-file wordle-past-words-06.02.26.txt --embed-file wordle-valid-words.txt
 	gcc config/combine.c -o combine.exe
 	./combine.exe swordle.html
 	rm combine.exe
 htmlserver:
-	emcc swordle.c --shell-file config/turtle_shell.html -sUSE_GLFW=3 -sMAX_WEBGL_VERSION=2 -sASYNCIFY -sINITIAL_MEMORY=1073741824 -DTURTLE_IMPLEMENTATION -DTURTLE_ENABLE_TEXTURES -DOS_BROWSER -O3 -o swordle.html --embed-file wordle-answers-alphabetical.txt --embed-file wordle-past-words-06.02.26.txt --embed-file wordle-valid-words.txt
+	emcc swordleWeb.c --shell-file config/turtle_shell.html -sUSE_GLFW=3 -sMAX_WEBGL_VERSION=2 -sASYNCIFY -sINITIAL_MEMORY=1073741824 -DTURTLE_IMPLEMENTATION -DTURTLE_ENABLE_TEXTURES -DOS_BROWSER -O3 -o swordle.html --embed-file wordle-answers-alphabetical.txt --embed-file wordle-past-words-06.02.26.txt --embed-file wordle-valid-words.txt
 runserver:
 	emrun swordle.html

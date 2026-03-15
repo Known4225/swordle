@@ -8,12 +8,10 @@ Past answers source: https://www.fiveforks.com/wordle/#a
 
 #include "turtle.h"
 #include <time.h>
-#include <pthread.h>
 
 /* forward declarations */
 void fillBest();
 void swordleUnicodeCallback(uint32_t codepoint);
-void *solverThread(void *arg);
 
 /* self.keys */
 enum {
@@ -62,8 +60,6 @@ typedef struct {
     tt_switch_t *hardModeSwitch; // hard mode switch
     tt_switch_t *twoLayerSwitch; // search two layers
     tt_switch_t *killerMoveSwitch; // instead of using variance heuristic, use mode of remaining words = 1
-    /* getPossibleWords */
-    uint32_t lookup[26];
     /* sidebars */
     double bestX;
     int32_t bestIndex;
@@ -187,10 +183,6 @@ void init() {
     self.canvasPossible = list_init();
     self.canvasGuesses = list_init();
     self.best = list_init();
-    /* getPossibleWords */
-    for (int32_t i = 0; i < 26; i++) {
-        self.lookup[i] = pow(2, i);
-    }
     /* sidebars */
     self.bestX = -250;
     self.bestIndex = 0;
@@ -212,8 +204,6 @@ void init() {
     self.progressPossible = 1.0; // unused now
     self.solverThreadExists = 1;
     self.solving = SOLVE_NOT_SOLVING;
-    pthread_t solverThreadVar;
-    pthread_create(&solverThreadVar, NULL, solverThread, NULL);
     /* signal handler */
     fillBest();
 }
@@ -251,6 +241,10 @@ void swordleUnicodeCallback(uint32_t codepoint) {
 int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
+    uint32_t lookup[26];
+    for (int32_t i = 0; i < 26; i++) {
+        lookup[i] = pow(2, i);
+    }
     uint32_t whitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF}; // so i just learned today that you can only do one of these when it is 0
     for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
@@ -265,7 +259,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
-                    whitelist[i] = self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    whitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:;
                     for (int32_t k = 0; k < i; k++) {
@@ -274,11 +268,11 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                             return 0;
                         }
                     }
-                    currentCount[canvas[j * 10 + i * 2] - 'A']++; // cannot ever have currentCountDirection set as a black letter can never proceed a yellow letter
-                    whitelist[i] &= ~self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    currentCount[canvas[j * 10 + i * 2] - 'A']++;
+                    whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_GREY:;
-                    uint32_t blacklist = ~self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    uint32_t blacklist = ~lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                     int32_t startingIndex = i;
                     if (currentCount[canvas[j * 10 + i * 2] - 'A'] == 0) {
                         for (int32_t k = 0; k < 5; k++) {
@@ -286,7 +280,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
                         }
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A'] *= -1;
-                        whitelist[i] &= ~self.lookup[canvas[j * 10 + i * 2] - 'A'];
+                        whitelist[i] &= ~lookup[canvas[j * 10 + i * 2] - 'A'];
                     }
                 break;
                 default:
@@ -294,7 +288,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
             }
         }
         for (int32_t i = 0; i < 26; i++) {
-            if (count[i] >= 0 && abs(currentCount[i]) >= count[i]) {
+            if (count[i] >= 0 && abs(currentCount[i]) > count[i]) {
                 count[i] = currentCount[i];
             }
         }
@@ -309,7 +303,7 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
         /* check whitelist */
         for (int32_t j = 0; j < 5; j++) {
             currentCount[word[j] - 'A']++;
-            if ((whitelist[j] & self.lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+            if ((whitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
                 good = 0;
                 break;
             }
@@ -340,6 +334,10 @@ int32_t getPossibleWords(list_t *output, char *canvas, list_t *wordSet) {
 int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet) {
     /* create word whitelist and global count */
     int8_t count[26] = {0}; // need to have at least count[letter] of a particular letter, if count[letter] is negative then you need to have exactly -count[letter] in a word
+    uint32_t lookup[26];
+    for (int32_t i = 0; i < 26; i++) {
+        lookup[i] = pow(2, i);
+    }
     uint32_t hardModeWhitelist[5] = {0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF, 0x3FFFFFF};
     for (int32_t j = 0; j < 6; j++) {
         int8_t currentCount[26] = {0};
@@ -354,7 +352,7 @@ int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet
                     } else {
                         currentCount[canvas[j * 10 + i * 2] - 'A']++;
                     }
-                    hardModeWhitelist[i] = self.lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
+                    hardModeWhitelist[i] = lookup[canvas[j * 10 + i * 2] - 'A']; // canvas uses capital letters
                 break;
                 case SWORDLE_COLOR_YELLOW:;
                     for (int32_t k = 0; k < i; k++) {
@@ -391,7 +389,7 @@ int32_t getHardModePossibleGuesses(list_t *output, char *canvas, list_t *wordSet
         /* check whitelist */
         for (int32_t j = 0; j < 5; j++) {
             currentCount[word[j] - 'A']++;
-            if ((hardModeWhitelist[j] & self.lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
+            if ((hardModeWhitelist[j] & lookup[word[j] - 'A']) == 0) { // wordlists use capital letters
                 good = 0;
                 break;
             }
@@ -524,33 +522,31 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int8_t 
     }
 }
 
-void *solverThread(void *arg) {
-    while (self.solverThreadExists) {
-        if (self.solving == SOLVE_QUEUE_SOLVE) {
-            self.solving = SOLVE_GET_POSSIBLE_WORDS;
-            self.progressBest = 0;
-            self.progressPossible = 1.0; // unused now
-            list_clear(self.canvasPossible);
-            getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
-            self.solving = SOLVE_GET_BEST_WORDS;
-            if (self.canvasPossible -> length == 0) {
-                printf("No Possible Words\n");
+void solve() {
+    if (self.solving == SOLVE_QUEUE_SOLVE) {
+        self.solving = SOLVE_GET_POSSIBLE_WORDS;
+        self.progressBest = 0;
+        self.progressPossible = 1.0; // unused now
+        list_clear(self.canvasPossible);
+        getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
+        self.solving = SOLVE_GET_BEST_WORDS;
+    } else if (self.solving == SOLVE_GET_BEST_WORDS) {
+        if (self.canvasPossible -> length == 0) {
+            printf("No Possible Words\n");
+            list_clear(self.best);
+        } else {
+            if (self.hardModeSwitch -> value) {
+                list_clear(self.canvasGuesses);
+                getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
                 list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
             } else {
-                if (self.hardModeSwitch -> value) {
-                    list_clear(self.canvasGuesses);
-                    getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
-                    list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
-                } else {
-                    list_clear(self.best);
-                    bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
-                }
+                list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
             }
-            self.solving = SOLVE_NOT_SOLVING;
         }
+        self.solving = SOLVE_NOT_SOLVING;
     }
-    return NULL;
 }
 
 void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double radius) {
@@ -719,20 +715,7 @@ void renderResults() {
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS || self.solving == SOLVE_GET_BEST_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
-        int32_t splitter = self.tick % 400;
-        if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
-        } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
-        } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
-        } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
-        }
-        swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
-        swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressBest, -1);
+        turtleTextWriteString("Searching", xpos, 0, 10, 50);
     } else {
         if (self.best -> length == 0) {
             swordle_setColor(SWORDLE_COLOR_TEXT);
@@ -780,20 +763,7 @@ void renderResults() {
     if (self.solving == SOLVE_QUEUE_SOLVE || self.solving == SOLVE_GET_POSSIBLE_WORDS) {
         tt_setColor(TT_COLOR_YELLOW);
         // swordle_setColor(SWORDLE_COLOR_YELLOW);
-        int32_t splitter = self.tick % 400;
-        if (splitter < 100) {
-            turtleTextWriteString("Searching", xpos, 10, 10, 50);
-        } else if (splitter < 200) {
-            turtleTextWriteString("Searching.", xpos, 10, 10, 50);
-        } else if (splitter < 300) {
-            turtleTextWriteString("Searching..", xpos, 10, 10, 50);
-        } else {
-            turtleTextWriteString("Searching...", xpos, 10, 10, 50);
-        }
-        swordle_setColor(SWORDLE_COLOR_TEXT);
-        turtleRectangle(xpos - 40, -10, xpos + 40, 0);
-        swordle_setColor(SWORDLE_COLOR_GREEN);
-        turtleRectangle(xpos - 39, -9, xpos - 39 + 78 * self.progressPossible, -1);
+        turtleTextWriteString("Searching", xpos, 0, 10, 50);
     } else {
         list_t *selectList;
         if (self.canvasPossible -> length == 0) {
@@ -842,6 +812,10 @@ void mouseTick() {
     if (turtleMouseDown()) {
         if (self.keys[S_KEY_LMB] == 0) {
             self.keys[S_KEY_LMB] = 1;
+        }
+    } else {
+        if (self.keys[S_KEY_LMB]) {
+            self.keys[S_KEY_LMB] = 0;
             if (self.mouseIndex != -1 && self.canvas[self.mouseIndex * 2] != 0) {
                 self.canvas[self.mouseIndex * 2 + 1]--;
                 if (self.canvas[self.mouseIndex * 2 + 1] < SWORDLE_COLOR_GREEN) {
@@ -880,8 +854,6 @@ void mouseTick() {
                 }
             }
         }
-    } else {
-        self.keys[S_KEY_LMB] = 0;
     }
     if (turtleKeyPressed(GLFW_KEY_ENTER)) {
         if (self.keys[S_KEY_ENTER] == 0) {
@@ -1079,10 +1051,11 @@ int main(int argc, char *argv[]) {
         turtleClear();
         renderCanvas();
         renderResults();
-        mouseTick();
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
         turtleUpdate(); // update the screen
+        solve();
+        mouseTick();
         end = clock();
         while ((double) (end - start) / CLOCKS_PER_SEC < (1.0 / tps)) {
             end = clock();
