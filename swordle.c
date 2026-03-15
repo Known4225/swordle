@@ -71,10 +71,13 @@ typedef struct {
     int32_t bestIndex;
     double bestOffset;
     tt_scrollbar_t *bestScrollbar;
+    int8_t bestTouchScroll;
     double possibleX;
     int32_t possibleIndex;
     double possibleOffset;
     tt_scrollbar_t *possibleScrollbar;
+    int8_t possibleTouchScroll;
+    double touchScrollAnchor;
     /* keyboard */
     double keyX[3]; // top, middle, bottom
     double keyY; // top left
@@ -198,10 +201,12 @@ void init() {
     self.bestIndex = 0;
     self.bestOffset = 0;
     self.bestScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.bestX + 62, -20, 6, 306, 50);
+    self.bestTouchScroll = 0;
     self.possibleX = 250;
     self.possibleIndex = 0;
     self.possibleOffset = 0;
     self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + 62, -20, 6, 306, 50);
+    self.possibleTouchScroll = 0;
     self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, self.possibleX - 84, 160, 6);
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
     self.twoLayerSwitch = tt_switchInit("Two Layer Search", NULL, self.possibleX - 84, 150, 6);
@@ -914,9 +919,42 @@ void mouseTick() {
                     }
                 }
             }
+            if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
+                self.bestTouchScroll = 1;
+                self.touchScrollAnchor = turtle.mouseY;
+            }
+            if (turtle.mouseX > self.possibleX - 70 && turtle.mouseX < 320) {
+                self.possibleTouchScroll = 1;
+                self.touchScrollAnchor = turtle.mouseY;
+            }
+        } else {
+            if (self.bestTouchScroll) {
+                self.bestScrollbar -> value -= (self.touchScrollAnchor - turtle.mouseY) * self.bestScrollbar -> barPercentage / 100;
+                if (self.bestScrollbar -> value < 0) {
+                    self.bestScrollbar -> value = 0;
+                }
+                if (self.bestScrollbar -> value > 100) {
+                    self.bestScrollbar -> value = 100;
+                }
+                self.touchScrollAnchor = turtle.mouseY;
+            }
+            if (self.possibleTouchScroll) {
+                self.possibleScrollbar -> value -= (self.touchScrollAnchor - turtle.mouseY) * self.possibleScrollbar -> barPercentage / 100;
+                if (self.possibleScrollbar -> value < 0) {
+                    self.possibleScrollbar -> value = 0;
+                }
+                if (self.possibleScrollbar -> value > 100) {
+                    self.possibleScrollbar -> value = 100;
+                }
+                self.touchScrollAnchor = turtle.mouseY;
+            }
         }
     } else {
-        self.keys[S_KEY_LMB] = 0;
+        if (self.keys[S_KEY_LMB]) {
+            self.keys[S_KEY_LMB] = 0;
+            self.bestTouchScroll = 0;
+            self.possibleTouchScroll = 0;
+        }
     }
     if (turtleKeyPressed(GLFW_KEY_ENTER)) {
         if (self.keys[S_KEY_ENTER] == 0) {
@@ -959,6 +997,7 @@ void mouseTick() {
     } else {
         self.keys[S_KEY_BACKSPACE] = 0;
     }
+    /* scrolling on sidebars */
     double scroll = turtleMouseWheel();
     if (scroll > 0) {
         if (turtle.mouseX < self.bestX + 70 && turtle.mouseX > -320) {
