@@ -8,7 +8,9 @@ Past answers source: https://www.fiveforks.com/wordle/#a
 
 #include "turtle.h"
 #include <time.h>
+#ifndef OS_BROWSER
 #include <pthread.h>
+#endif /* OS_BROWSER */
 
 /* forward declarations */
 void fillBest();
@@ -212,8 +214,10 @@ void init() {
     self.progressPossible = 1.0; // unused now
     self.solverThreadExists = 1;
     self.solving = SOLVE_NOT_SOLVING;
+    #ifndef OS_BROWSER
     pthread_t solverThreadVar;
     pthread_create(&solverThreadVar, NULL, solverThread, NULL);
+    #endif /* OS_BROWSER */
     /* signal handler */
     fillBest();
 }
@@ -524,6 +528,7 @@ double bestWord(list_t *output, list_t *possibleWords, list_t *allWords, int8_t 
     }
 }
 
+#ifndef OS_BROWSER
 void *solverThread(void *arg) {
     while (self.solverThreadExists) {
         if (self.solving == SOLVE_QUEUE_SOLVE) {
@@ -552,6 +557,36 @@ void *solverThread(void *arg) {
     }
     return NULL;
 }
+#endif /* OS_BROWSER */
+
+#ifdef OS_BROWSER
+void solve() {
+    if (self.solving == SOLVE_QUEUE_SOLVE) {
+        self.solving = SOLVE_GET_POSSIBLE_WORDS;
+        self.progressBest = 0;
+        self.progressPossible = 1.0; // unused now
+        list_clear(self.canvasPossible);
+        getPossibleWords(self.canvasPossible, self.canvas, self.possibleWords);
+        self.solving = SOLVE_GET_BEST_WORDS;
+    } else if (self.solving == SOLVE_GET_BEST_WORDS) {
+        if (self.canvasPossible -> length == 0) {
+            printf("No Possible Words\n");
+            list_clear(self.best);
+        } else {
+            if (self.hardModeSwitch -> value) {
+                list_clear(self.canvasGuesses);
+                getHardModePossibleGuesses(self.canvasGuesses, self.canvas, self.allWords);
+                list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.canvasGuesses, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
+            } else {
+                list_clear(self.best);
+                bestWord(self.best, self.canvasPossible, self.allWords, self.hardModeSwitch -> value, self.twoLayerSwitch -> value, self.twoLayerSwitch -> value, self.killerMoveSwitch -> value);
+            }
+        }
+        self.solving = SOLVE_NOT_SOLVING;
+    }
+}
+#endif /* OS_BROWSER */
 
 void turtleRoundedRectangle(double x1, double y1, double x2, double y2, double radius) {
     if (x1 > x2) {
@@ -1045,7 +1080,7 @@ void parseRibbonOutput() {
 
 int main(int argc, char *argv[]) {
     /* create window */
-    GLFWwindow *window = turtleCreateWindow("swordle");
+    GLFWwindow *window = turtleCreateWindow(TURTLE_WINDOW_DEFAULT_WIDTH, TURTLE_WINDOW_DEFAULT_HEIGHT, "swordle");
     if (window == NULL) {
         return -1; // failed to create window
     }
@@ -1083,6 +1118,9 @@ int main(int argc, char *argv[]) {
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
         turtleUpdate(); // update the screen
+        #ifdef OS_BROWSER
+        solve();
+        #endif /* OS_BROWSER */
         end = clock();
         while ((double) (end - start) / CLOCKS_PER_SEC < (1.0 / tps)) {
             end = clock();
