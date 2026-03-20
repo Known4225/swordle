@@ -163,7 +163,7 @@ void init() {
         }
         fclose(possiblefp);
     }
-    FILE *pastfp = fopen("wordle-past-words-06.02.26.txt", "r");
+    FILE *pastfp = fopen("wordle-past-words-20.03.26.txt", "r");
     if (pastfp != NULL) {
         char word[10];
         while (fgets(word, 10, pastfp) != NULL) {
