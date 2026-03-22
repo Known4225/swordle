@@ -75,6 +75,7 @@ typedef struct {
     double bestOffset;
     tt_scrollbar_t *bestScrollbar;
     int8_t bestTouchScroll;
+    double bestTouchScrollVelocity;
     double possibleX;
     double possibleY;
     double possibleWidth;
@@ -82,6 +83,7 @@ typedef struct {
     double possibleOffset;
     tt_scrollbar_t *possibleScrollbar;
     int8_t possibleTouchScroll;
+    double possibleTouchScrollVelocity;
     double touchScrollAnchor;
     /* keyboard */
     double keyX[3]; // top, middle, bottom
@@ -211,6 +213,7 @@ void init() {
     self.bestOffset = 0;
     self.bestScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.bestX + self.bestWidth * 6.2 / 7.0, self.bestY - 170, 6, 306, 50);
     self.bestTouchScroll = 0;
+    self.bestTouchScrollVelocity = 0;
     self.possibleX = 250;
     self.possibleY = 160;
     self.possibleWidth = 70;
@@ -218,6 +221,7 @@ void init() {
     self.possibleOffset = 0;
     self.possibleScrollbar = tt_scrollbarInit(NULL, TT_SCROLLBAR_TYPE_VERTICAL, self.possibleX + self.possibleWidth * 6.2 / 7.0, self.possibleY - 170, 6, 306, 50);
     self.possibleTouchScroll = 0;
+    self.possibleTouchScrollVelocity = 0;
     self.hardModeSwitch = tt_switchInit("Hard Mode", NULL, 166, 160, 6);
     self.hardModeSwitch -> style = TT_SWITCH_STYLE_SIDESWIPE_RIGHT;
     self.twoLayerSwitch = tt_switchInit("Two Layer Search", NULL, 166, 150, 6);
@@ -954,23 +958,11 @@ void mouseTick() {
             }
         } else {
             if (self.bestTouchScroll) {
-                self.bestScrollbar -> value -= (self.touchScrollAnchor - turtle.mouseY) * self.bestScrollbar -> barPercentage / 100;
-                if (self.bestScrollbar -> value < 0) {
-                    self.bestScrollbar -> value = 0;
-                }
-                if (self.bestScrollbar -> value > 100) {
-                    self.bestScrollbar -> value = 100;
-                }
+                self.bestTouchScrollVelocity = (self.touchScrollAnchor - turtle.mouseY) * self.bestScrollbar -> barPercentage / 250;
                 self.touchScrollAnchor = turtle.mouseY;
             }
             if (self.possibleTouchScroll) {
-                self.possibleScrollbar -> value -= (self.touchScrollAnchor - turtle.mouseY) * self.possibleScrollbar -> barPercentage / 100;
-                if (self.possibleScrollbar -> value < 0) {
-                    self.possibleScrollbar -> value = 0;
-                }
-                if (self.possibleScrollbar -> value > 100) {
-                    self.possibleScrollbar -> value = 100;
-                }
+                self.possibleTouchScrollVelocity = (self.touchScrollAnchor - turtle.mouseY) * self.possibleScrollbar -> barPercentage / 250;
                 self.touchScrollAnchor = turtle.mouseY;
             }
         }
@@ -981,6 +973,23 @@ void mouseTick() {
             self.possibleTouchScroll = 0;
         }
     }
+    /* touch scroll */
+    self.bestScrollbar -> value -= self.bestTouchScrollVelocity;
+    if (self.bestScrollbar -> value < 0) {
+        self.bestScrollbar -> value = 0;
+    }
+    if (self.bestScrollbar -> value > 100) {
+        self.bestScrollbar -> value = 100;
+    }
+    self.possibleScrollbar -> value -= self.possibleTouchScrollVelocity;
+    if (self.possibleScrollbar -> value < 0) {
+        self.possibleScrollbar -> value = 0;
+    }
+    if (self.possibleScrollbar -> value > 100) {
+        self.possibleScrollbar -> value = 100;
+    }
+    self.bestTouchScrollVelocity *= 0.95;
+    self.possibleTouchScrollVelocity *= 0.95;
     if (turtleKeyPressed(GLFW_KEY_ENTER)) {
         if (self.keys[S_KEY_ENTER] == 0) {
             self.keys[S_KEY_ENTER] = 1;
