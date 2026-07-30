@@ -1111,14 +1111,14 @@ void defaultUISetup() {
 
 void phoneUISetup() {
     /* canvas */
-    self.canvasX = -170;
-    self.canvasY = 140;
-    self.dropX = 70;
-    self.dropY = -70;
+    self.canvasX = -160;
+    self.canvasY = 145;
+    self.dropX = 65;
+    self.dropY = -65;
     self.keyX[0] = -230;
     self.keyX[1] = -206;
     self.keyX[2] = -230;
-    self.keyY = -290;
+    self.keyY = -255;
     self.keyDropX = 46.46;
     self.keyDropY = -64;
     self.keyDropSpecialX = 70.46;
